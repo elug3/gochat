@@ -1,0 +1,96 @@
+networks:
+  proxy-net:
+    driver: bridge
+  broker-net:
+    driver: bridge
+  auth-net:
+    driver: bridge
+  contacts-net:
+    driver: bridge
+  chat-net:
+    driver: bridge
+
+services:
+  reverse-proxy:
+    image: traefik:v3.3
+    command: --api.insecure=true --providers.docker
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik.yaml:/etc/traefik/traefik.yaml
+    networks:
+      - proxy-net
+
+  broker:
+    image: apache/kafka:4.0.0
+    container_name: broker
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    ports:
+      - "9092:9092"
+
+  user-db:
+    image: "postgres:17.4"
+    environment:
+      POSTGRES_PASSWORD: password
+    networks:
+      - auth-net
+
+  contacts-db:
+    image: neo4j:5.26.5
+    environment:
+      NEO4J_PLUGINS: '["apoc"]'
+
+    networks:
+      - contacts-net
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+  chat-db:
+    image: "postgres:17.4"
+    environment:
+      POSTGRES_PASSWORD: password
+    networks:
+      - chat-net
+
+  web:
+    build: "./web"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`localhost`)"
+
+  auth-service:
+    build: "./auth-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`api.localhost`) && Path(`/auth`)"
+      - "traefik.http.middlewares.test-auth.forwardauth.address=http://auth-service:8081/auth"
+      - "traefik.http.middlewares.test-auth.forwardauth.authResponseHeaders=X-Auth-User"
+    networks:
+      - proxy-net
+      - auth-net
+
+  contacts-service:
+    build: "./contacts-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.contacts.rule=Host(`api.localhost`) && PathPrefix(`/contacts`)"
+      - "treafik.http.routers.contacts.middlewares=test-auth"
+    environment:
+      NEO4J_HOST: chatapp_contacts-db
+    networks:
+      - proxy-net 
+      - contacts-net 
