@@ -1,4 +1,4 @@
-module example.com/chatapp/cmd/message-store
+module example.com/elug3/chatapp/cmd/message-store
 
 go 1.24.2
 
