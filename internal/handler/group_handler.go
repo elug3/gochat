@@ -17,6 +17,7 @@ func NewGroupHandler(contacts *service.ContactsService) (*GroupHandler, error) {
 	return &GroupHandler{Contacts: contacts}, nil
 }
 
+// parseGroupId extracts and validates the group ID from the request context.
 func parseGroupId(c *gin.Context) (int, error) {
 	groupId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -28,16 +29,11 @@ func parseGroupId(c *gin.Context) (int, error) {
 	return groupId, nil
 }
 
+// HandleGetGroups retrieves all groups for the authenticated user.
 func (h *GroupHandler) HandleGetGroups(c *gin.Context) {
 	userId := c.GetInt("userId")
+
 	groups, err := h.Contacts.GetGroups(userId)
-	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{
-			"code":    http.StatusInternalServerError,
-			"message": err.Error(),
-		})
-		return
-	}
 	if err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{
 			"code":    http.StatusInternalServerError,
@@ -51,11 +47,11 @@ func (h *GroupHandler) HandleGetGroups(c *gin.Context) {
 // HandleGetGroup retrieves a specific group by ID for the authenticated user.
 func (h *GroupHandler) HandleGetGroup(c *gin.Context) {
 	userId := c.GetInt("userId")
-	groupId := c.Param("id")
-	if groupId == "" {
+	groupId, err := parseGroupId(c)
+	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{
 			"code":    http.StatusBadRequest,
-			"message": "group ID is required",
+			"message": fmt.Sprintf("invalid group ID: '%d'", groupId),
 		})
 		return
 	}
@@ -68,16 +64,10 @@ func (h *GroupHandler) HandleGetGroup(c *gin.Context) {
 		})
 		return
 	}
-	if group == nil {
-		c.IndentedJSON(http.StatusNotFound, gin.H{
-			"code":    http.StatusNotFound,
-			"message": "group not found",
-		})
-		return
-	}
 	c.JSON(http.StatusOK, group)
 }
 
+// HandleCreateGroup creates a new group for the authenticated user.
 func (h *GroupHandler) HandleCreateGroup(c *gin.Context) {
 	userId := c.GetInt("userId")
 

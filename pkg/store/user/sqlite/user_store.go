@@ -244,7 +244,7 @@ func openDB(cfg *config.Config) (*sql.DB, error) {
 	if cfg.NoSave {
 		path = ":memory:"
 	} else {
-		path = cfg.SaveDir + "/contacts.db"
+		path = cfg.SaveDir + "/users.db"
 	}
 	return sql.Open("sqlite3", path)
 }
