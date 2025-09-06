@@ -1,0 +1,35 @@
+package model
+
+import (
+	"time"
+
+	"github.com/elug3/gochat/internal/services/contcts_service/access"
+)
+
+type Profile struct {
+	Id       int        `json:"id"`
+	Name     string     `json:"name"`
+	Birthday *time.Time `json:"birthday,omitempty"`
+}
+
+type Group struct {
+	Id        int       `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Member struct {
+	GroupId   int         `json:"group_id"`
+	UserId    int         `json:"user_id"`
+	Role      access.Role `json:"role"`
+	Name      string      `json:"name,omitempty"`
+	CreatedAt time.Time   `json:"created_at,omitempty"`
+}
+
+type Message struct {
+	Id      int       `json:"id"`
+	ChatId  int       `json:"chat_id"`
+	Sender  int       `json:"sender_id"`
+	Content string    `json:"content"`
+	SentAt  time.Time `json:"sent_at"`
+}

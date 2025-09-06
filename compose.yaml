@@ -1,0 +1,12 @@
+version: '3'
+services:
+  krakend:
+    image: krakend:2.10
+    container_name: krakend
+    network_mode: "host"
+    volumes:
+      - ./krakend.json:/etc/krakend/krakend.json
+      - ./api/grpc:/etc/krakend/grpcatalog
+    command: ["run", "-c", "/etc/krakend/krakend.json", "-d"]
+
+  

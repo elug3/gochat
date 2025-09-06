@@ -1,0 +1,10 @@
+{
+    "$schema": "https://www.krakend.io/schema/v2.10/krakend.json",
+    "version": 3,
+    "endpoints": [
+        {
+            "endpoint": "/register",
+            "backend": []
+        }
+    ]
+}
