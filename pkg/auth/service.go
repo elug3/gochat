@@ -3,13 +3,17 @@ package auth
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
+	"github.com/elug3/gochat/pkg/auth/internal/jwk"
 	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/elug3/gochat/pkg/auth/internal/store"
 	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
@@ -20,9 +24,41 @@ import (
 type AuthService struct {
 	store  store.AuthStore
 	jwtKey *rsa.PrivateKey
+	jwks   *jwk.Jwks
 }
 
-func NewAuthService(jwtKey *rsa.PrivateKey) (*AuthService, error) {
+func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
+	keyData, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	der, _ := pem.Decode(keyData)
+	key, err := x509.ParsePKCS8PrivateKey(der.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	rsaKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("not an RSA private key")
+	}
+	return rsaKey, nil
+}
+
+func NewAuthService(opts *Options) (*AuthService, error) {
+	// Load private key
+	jwtKey, err := loadPrivateKey(opts.KeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load private key: %w", err)
+	}
+
+	// Create JWKs
+	jwks := jwk.NewJwks()
+	err = jwks.AddKey(jwtKey.PublicKey, "key1")
+	if err != nil {
+		return nil, fmt.Errorf("failed to add key to JWKs: %w", err)
+	}
+
+	// Initialize store
 	store, err := sqlite3.NewAuthStore()
 	if err != nil {
 		return nil, err
@@ -30,6 +66,7 @@ func NewAuthService(jwtKey *rsa.PrivateKey) (*AuthService, error) {
 	return &AuthService{
 		store:  store,
 		jwtKey: jwtKey,
+		jwks:   jwks,
 	}, nil
 }
 
@@ -43,21 +80,22 @@ func credentialsRule(username, password string) error {
 	return nil
 }
 
-func (s *AuthService) CreateCredentials(ctx context.Context, userId int32, username, password string) error {
+func (s *AuthService) RegisterUser(ctx context.Context, username, password string) (int32, error) {
 	err := credentialsRule(username, password)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
 	passwordHash, err := newHash(password)
 	if err != nil {
-		return err
-	}
-	if err = s.store.SaveCredentials(ctx, userId, username, passwordHash); err != nil {
-		return fmt.Errorf("cannot create credentials: %w", err)
+		return 0, err
 	}
 
-	return nil
+	userId, err := s.store.CreateCredential(ctx, username, passwordHash)
+	if err != nil {
+		return 0, fmt.Errorf("cannot create user '%s': %w", username, err)
+	}
+
+	return userId, nil
 }
 
 func (s *AuthService) UpdatePassword(ctx context.Context, userId int32, password string) error {
@@ -109,9 +147,14 @@ func ValidateAccessToken(ctx context.Context, accessToken string) (userID int64,
 }
 
 func (s *AuthService) RevokeAccessToken(ctx context.Context) error {
-
 	return nil
+}
 
+func (s *AuthService) GetJwksData() ([]byte, error) {
+	if s.jwks == nil {
+		return nil, errors.New("jwks not initialized")
+	}
+	return s.jwks.Json()
 }
 
 func (s *AuthService) Close() error {
@@ -119,14 +162,17 @@ func (s *AuthService) Close() error {
 }
 
 func (s *AuthService) newClaims(userId int32, expiresIn time.Duration) (accessToken string, err error) {
-	t := time.Now()
-	expiresAt := t.Add(expiresIn)
+	issudAt := time.Now()
+	expiresAt := issudAt.Add(expiresIn)
 
-	claims := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.RegisteredClaims{
-		Subject:   strconv.FormatInt(int64(userId), 10),
-		ExpiresAt: jwt.NewNumericDate(expiresAt),
-		IssuedAt:  jwt.NewNumericDate(t),
+	claims := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": strconv.Itoa(int(userId)),
+		"iat": jwt.NewNumericDate(issudAt),
+		"exp": jwt.NewNumericDate(expiresAt),
+		"aud": "api",
 	})
+	claims.Header["kid"] = "key1"
+
 	accessToken, err = claims.SignedString(s.jwtKey)
 	if err != nil {
 		return "", err

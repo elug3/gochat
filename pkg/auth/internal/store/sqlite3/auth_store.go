@@ -49,6 +49,38 @@ func (store *AuthStore) GetCredential(ctx context.Context, username string) (*mo
 	return &c, nil
 }
 
+func (store *AuthStore) CreateCredential(ctx context.Context, username string, passwordHash string) (int32, error) {
+	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`
+	INSERT INTO credentials (username, password_hash)
+	VALUES (?, ?);
+	`, username, passwordHash)
+
+	if err != nil {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) {
+			if sqliteErr.Code == sqlite3.ErrConstraint {
+				return 0, errs.ErrExists
+			}
+			return 0, err
+		}
+	}
+
+	userId, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return int32(userId), nil
+}
+
 func (store *AuthStore) SaveCredentials(ctx context.Context, userId int32, username string, passwordHash string) error {
 	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {

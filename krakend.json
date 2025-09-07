@@ -1,10 +1,43 @@
 {
     "$schema": "https://www.krakend.io/schema/v2.10/krakend.json",
     "version": 3,
+    "debug_endpoint": true,
     "endpoints": [
         {
             "endpoint": "/register",
-            "backend": []
+            "method": "POST",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/register",
+
+                    "host": ["localhost:8000"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/user",
+            "method": "GET",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": [
+                        "api"
+                    ],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://localhost:8000/.well-known/jwks.json",
+                    "cache": false
+                }
+            },
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user",
+                    "host": ["localhost:8001"]
+                }
+            ]
         }
     ]
 }

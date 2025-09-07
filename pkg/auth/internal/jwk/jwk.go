@@ -3,6 +3,7 @@ package jwk
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -48,6 +49,9 @@ func LoadFile(path string) (*Jwks, error) {
 	return &jwks, nil
 }
 
-func (j *Jwks) Data() ([]byte, error) {
-	return json.Marshal(j.set)
+func (j *Jwks) Json() ([]byte, error) {
+	if j.set == nil {
+		return nil, fmt.Errorf("jwks set not initialized")
+	}
+	return json.MarshalIndent(j.set, "", "  ")
 }

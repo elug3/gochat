@@ -43,6 +43,6 @@ func (s *UserService) getUser(txu store.TxUser, userId int32) (*model.User, erro
 	return user, err
 }
 
-func (s *UserService) CreateUser(ctx context.Context, user *model.User) error {
+// func (s *UserService) CreateUser(ctx context.Context, user *model.User) error {
 
-}
+// }
