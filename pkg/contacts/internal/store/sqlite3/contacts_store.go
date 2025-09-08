@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"github.com/elug3/gochat/internal/services/contcts_service/access"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/store"
 	"github.com/elug3/gochat/internal/services/contcts_service/model"
-	"github.com/elug3/gochat/internal/services/contcts_service/store"
+	"github.com/mattn/go-sqlite3"
 )
 
 type ContactsStore struct {
@@ -18,8 +20,8 @@ type TxContacts struct {
 	tx *sql.Tx
 }
 
-func NewContactsStore() (*ContactsStore, error) {
-	db, err := openDB()
+func NewContactsStore(saveDir string, noSave bool) (*ContactsStore, error) {
+	db, err := openDB(saveDir, noSave)
 	if err != nil {
 		return nil, err
 	}
@@ -54,46 +56,21 @@ func (txc *TxContacts) GetGroup(groupId int) (*model.Group, error) {
 	WHERE id = ?
 	`, groupId).Scan(&group.Id, &group.Name, &group.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 	return &group, nil
 }
 
-func (txc *TxContacts) GetGroups(userId int) ([]model.Group, error) {
-	exists, err := txc.profileExists(userId)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		// return nil, &store.Error{
-		// 	Kind:    store.KindProfile,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("profile '%d' not found.", userId),
-		// }
-	}
-
-	if userId <= 0 {
-		// return nil, &store.Error{
-		// 	Kind:    store.KindUser,
-		// 	Err:     store.ErrBadRequest,
-		// 	Message: "userId must be greater than 0.",
-		// }
-	}
-	groups, err := txc.getGroups(userId)
-	if err != nil {
-		return nil, err
-	}
-	return groups, nil
-}
-
-func (txc *TxContacts) getGroups(userId int) ([]model.Group, error) {
+// ListGroups returns a list of groups
+func (txc *TxContacts) ListGroups(limit int) ([]model.Group, error) {
+	// TODO: add query param to search by name, time
 	rows, err := txc.tx.Query(`
-	SELECT g.id, g.name, g.created_at
-	FROM groups g
-	JOIN member m ON g.id = m.group_id
-	WHERE m.user_id = ?`, userId)
+	SELECT id, name, created_at
+	FROM groups
+	LIMIT ?;
+	`, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -101,12 +78,54 @@ func (txc *TxContacts) getGroups(userId int) ([]model.Group, error) {
 	for rows.Next() {
 		var group model.Group
 		if err = rows.Scan(&group.Id, &group.Name, &group.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
+			return nil, err
 		}
 		groups = append(groups, group)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows: %w", err)
+		return nil, err
+	}
+
+	return groups, nil
+}
+
+func (txc *TxContacts) ListUserGroups(userId int) ([]model.Group, error) {
+	exists, err := txc.profileExists(userId)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errs.ErrUserNotExists
+	}
+
+	groups, err := txc.listUserGroups(userId)
+	if err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+func (txc *TxContacts) listUserGroups(userId int) ([]model.Group, error) {
+	rows, err := txc.tx.Query(`
+	SELECT g.id, g.name, g.created_at
+	FROM groups g
+	JOIN member m ON g.id = m.group_id
+	WHERE m.user_id = ?`, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	groups := make([]model.Group, 0)
+	for rows.Next() {
+		var group model.Group
+		if err = rows.Scan(&group.Id, &group.Name, &group.CreatedAt); err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return groups, nil
@@ -114,11 +133,7 @@ func (txc *TxContacts) getGroups(userId int) ([]model.Group, error) {
 
 func (txc *TxContacts) CreateGroup(name string) (*model.Group, error) {
 	if len(name) < 2 {
-		// return nil, &store.Error{
-		// 	Kind:    store.KindGroup,
-		// 	Err:     store.ErrBadRequest,
-		// 	Message: "Group name must be at least two characters long",
-		// }
+		return nil, fmt.Errorf("group name must be at least 2 characters long")
 	}
 	row := txc.tx.QueryRow(`
 	INSERT INTO groups (name)
@@ -162,22 +177,14 @@ func (txc *TxContacts) MemberExists(groupId, userId int) (bool, error) {
 		EXISTS(SELECT 1 FROM member WHERE group_id = ? AND user_id = ?) as member_exists;
 	`, userId, groupId, groupId, userId).Scan(&profileExists, &groupExists, &memberExists)
 	if err != nil {
-		return false, fmt.Errorf("query.checkMemberExists: %w", err)
+		return false, err
 	}
 
 	if !profileExists {
-		// return false, &store.Error{
-		// 	Kind:    store.KindProfile,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("user or profile %q not found", userId),
-		// }
+		return false, errs.ErrUserNotExists
 	}
 	if !groupExists {
-		// return false, &store.Error{
-		// 	Kind:    store.KindGroup,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("group %q not found", groupId),
-		// }
+		return false, errs.ErrGroupNotExists
 	}
 	return memberExists, nil
 }
@@ -188,11 +195,7 @@ func (txc *TxContacts) CreateMember(groupId, userId int, role access.Role) (*mod
 		return nil, err
 	}
 	if exists {
-		// return nil, &store.Error{
-		// 	Kind:    store.KindGroup,
-		// 	Err:     store.ErrExists,
-		// 	Message: fmt.Sprintf("user %q already exists in group %q", userId, groupId),
-		// }
+		return nil, errs.ErrExists
 	}
 
 	row := txc.tx.QueryRow(`
@@ -232,14 +235,14 @@ func (txc *TxContacts) GetMember(groupId, userId int) (*model.Member, error) {
 	return &member, nil
 }
 
-func (txc *TxContacts) GetMembers(groupId int) ([]model.Member, error) {
+func (txc *TxContacts) ListGroupMembers(groupId int) ([]model.Member, error) {
 	rows, err := txc.tx.Query(`
 	SELECT group_id, user_id, created_at, role
 	FROM member
 	WHERE group_id = ?;
 	`, groupId)
 	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -247,12 +250,12 @@ func (txc *TxContacts) GetMembers(groupId int) ([]model.Member, error) {
 	for rows.Next() {
 		var member model.Member
 		if err = rows.Scan(&member.GroupId, &member.UserId, &member.CreatedAt, &member.Role); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
+			return nil, err
 		}
 		members = append(members, member)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows: %w", err)
+		return nil, err
 	}
 	return members, nil
 }
@@ -263,11 +266,7 @@ func (txc *TxContacts) DeleteMember(groupId, userId int) error {
 		return err
 	}
 	if !exists {
-		// return &store.Error{
-		// 	Kind:    store.KindGroup,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("member %q not found in group %q", userId, groupId),
-		// }
+		return errs.ErrNotFound
 	}
 
 	result, err := txc.tx.Exec(`
@@ -299,13 +298,35 @@ func (txc *TxContacts) profileExists(id int) (bool, error) {
 	return profileExists, nil
 }
 
+func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
+	rows, err := txc.tx.Query(`
+	SELECT user_id, name
+	FROM profile
+	LIMIT ?;
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	profiles := make([]model.Profile, 0)
+	for rows.Next() {
+		var profile model.Profile
+		if err = rows.Scan(&profile.Id, &profile.Name); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, profile)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return profiles, nil
+}
+
 func (txc *TxContacts) CreateProfile(userId int, name string) (*model.Profile, error) {
 	if exists, _ := txc.profileExists(userId); exists {
-		// return nil, &store.Error{
-		// 	Kind:    store.KindProfile,
-		// 	Err:     store.ErrExists,
-		// 	Message: fmt.Sprintf("profile %q already exists", userId),
-		// }
+		return nil, errs.ErrExists
 	}
 
 	row := txc.tx.QueryRow(`
@@ -326,13 +347,9 @@ func (txc *TxContacts) CreateProfile(userId int, name string) (*model.Profile, e
 func (txc *TxContacts) DeleteProfile(id int) error {
 	if exists, err := txc.profileExists(id); !exists {
 		if err != nil {
-			return fmt.Errorf("profileExists: %w", err)
+			return err
 		}
-		// return &store.Error{
-		// 	Kind:    store.KindProfile,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("profile %q not found", id),
-		// }
+		return errs.ErrUserNotExists
 	}
 
 	result, err := txc.tx.Exec(`
@@ -352,9 +369,53 @@ func (txc *TxContacts) DeleteProfile(id int) error {
 	return nil
 }
 
-func openDB() (*sql.DB, error) {
-	// TODO
-	return nil, nil
+func (txc *TxContacts) FindOwners(userId int) ([]model.Member, error) {
+	rows, err := txc.tx.Query(`
+	SELECT group_id, user_id, created_at, role
+	FROM member
+	WHERE user_id = ? AND role = ?;
+	`, userId, access.RoleOwner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]model.Member, 0)
+	for rows.Next() {
+		var member model.Member
+		if err = rows.Scan(
+			&member.GroupId,
+			&member.UserId,
+			&member.CreatedAt,
+			&member.Role,
+		); err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// wrapErr converts sqlite3.Error to store.Error
+// if the error cannot be converted, it returns the original error
+func wrapErr(err error) error {
+	var sqlErr sqlite3.Error
+	errors.As(err, &sqlErr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.ErrNotFound
+	}
+	return err
+}
+
+func openDB(saveDir string, inMemory bool) (*sql.DB, error) {
+	if inMemory {
+		return sql.Open("sqlite3", ":memory:")
+	}
+	path := saveDir + "/contacts.db"
+	return sql.Open("sqlite3", path)
 }
 
 func initDB(db *sql.DB) error {
