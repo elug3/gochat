@@ -7,35 +7,21 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/elug3/gochat/pkg/config"
-	"github.com/elug3/gochat/pkg/model"
-	"github.com/elug3/gochat/pkg/store"
 	"github.com/redis/go-redis/v9"
 )
-
-func init() {
-	store.RegisterDriver("redis", func(cfg *config.Config) (store.ChatStore, error) {
-		return NewChatStore(cfg)
-
-	})
-}
 
 type ChatStore struct {
 	rdb *redis.Client
 }
 
-func NewChatStore(cfg *config.Config) (*ChatStore, error) {
+func NewChatStore(redisUrl string) (*ChatStore, error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*5)
 	defer cancel()
-	// TODO: unused config
-	addr := "localhost:6379"
 	rdb := redis.NewClient(&redis.Options{
-		Addr: addr,
+		Addr: redisUrl,
 	})
 
-	rdb.Ping(ctx).Err()
-	err := rdb.Ping(context.Background()).Err()
-	if err != nil {
+	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 	store := ChatStore{
@@ -115,22 +101,4 @@ func (store *ChatStore) UpdateLastMessage(ctx context.Context, chatId int, messa
 		return fmt.Errorf("failed to update last message: %s", res.Err)
 	}
 	return nil
-}
-
-func (store *ChatStore) ListChatSummaries(ctx context.Context, userId int) ([]model.ChatSummary, error) {
-	s, err := listUserChatSummariesScript.Run(ctx, store.rdb, []string{strconv.Itoa(userId)}).Text()
-	if err != nil {
-		return nil, err
-	}
-	res := struct {
-		Chats []model.ChatSummary
-		Err   string
-	}{}
-	if err = json.Unmarshal([]byte(s), &res); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal result: %w", err)
-	}
-	if res.Err != "" {
-		return nil, fmt.Errorf("failed to list chat summaries: %s", res.Err)
-	}
-	return res.Chats, nil
 }

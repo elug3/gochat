@@ -9,11 +9,12 @@ import (
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/store/sqlite3"
 	"github.com/elug3/gochat/internal/services/contcts_service/model"
 	"github.com/elug3/gochat/shared/events"
+	"github.com/rs/zerolog/log"
 )
 
 type ContactsService struct {
 	store store.ContactsStore
-	ep    *events.EventPublisher
+	pub   *events.Publisher
 }
 
 func NewContactsService(opts *Options) (*ContactsService, error) {
@@ -21,8 +22,14 @@ func NewContactsService(opts *Options) (*ContactsService, error) {
 	if err != nil {
 		return nil, err
 	}
+	pub, err := events.NewPublisher(opts.NatsUrl)
+	if err != nil {
+		return nil, err
+	}
+
 	s := ContactsService{
 		store: contactsStore,
+		pub:   pub,
 	}
 	return &s, nil
 }
@@ -62,35 +69,34 @@ func (s *ContactsService) CreateUserGroup(userId int, groupName string) (*model.
 	}
 	defer txc.Rollback()
 
-	group, err := txc.CreateGroup(groupName)
+	g, err := txc.CreateGroup(groupName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create group '%s': %w", groupName, err)
 
 	}
-	if _, err = s.join(txc, group.Id, userId, access.RoleOwner); err != nil {
-		return nil, fmt.Errorf("cannot add user '%d' to group '%d': %w", userId, group.Id, err)
+	if _, err = s.join(txc, g.Id, userId, access.RoleOwner); err != nil {
+		return nil, fmt.Errorf("cannot add user '%d' to group '%d': %w", userId, g.Id, err)
 	}
 	if err = txc.Commit(); err != nil {
 		return nil, err
 	}
 
-	// if err = s.ep.Publish(events.GroupCreated{
-	// 	GroupId:   group.Id,
-	// 	GroupName: group.Name,
-	// 	TimeStamp: time.Now().Unix(),
-	// }); err != nil {
-	// 	return nil, fmt.Errorf("Publish: %w", err)
-	// }
-	// if err = s.ep.Publish(events.MemberJoined{
-	// 	GroupId:   group.Id,
-	// 	UserId:    userId,
-	// 	Role:      access.RoleOwner,
-	// 	TimeStamp: time.Now().Unix(),
-	// }); err != nil {
-	// 	return nil, fmt.Errorf("Publish: %w", err)
-	// }
+	if err = s.pub.Publish(events.GroupCreated{
+		GroupId:   g.Id,
+		GroupName: g.Name,
+		TimeStamp: g.CreatedAt.Unix(),
+	}); err != nil {
+		log.Err(err).Msgf("cannot publish GroupCreated event for group '%d'", g.Id)
+	}
+	if err = s.pub.Publish(events.MemberJoined{
+		GroupId:   g.Id,
+		UserId:    userId,
+		TimeStamp: g.CreatedAt.Unix(),
+	}); err != nil {
+		log.Err(err).Msgf("cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
+	}
 
-	return group, nil
+	return g, nil
 }
 
 func (s *ContactsService) ListUserGroups(userId int) ([]model.Group, error) {

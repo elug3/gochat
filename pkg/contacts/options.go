@@ -11,6 +11,8 @@ type Options struct {
 	// directory where to save the database file
 	SaveDir string
 	NoSave  bool
+
+	NatsUrl string
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -22,6 +24,8 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 
 	fs.StringVar(&opts.SaveDir, "d", "./", "Directory where to save the database file")
 	fs.BoolVar(&opts.NoSave, "no-save", false, "Directory where to save the database file")
+
+	fs.StringVar(&opts.NatsUrl, "nats", "nats://localhost:4222", "NATS server URL")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

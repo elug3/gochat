@@ -1,0 +1,96 @@
+package events
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Event interface {
+	Subject() string
+}
+
+const (
+	// SubjectUserRegistered is the subject for UserRegistered events.
+	SubjectUserRegistered = "user.registered"
+
+	SubjectGroupCreated = "contacts.group.created"
+	SubjectGroupDeleted = "contacts.group.deleted"
+	SubjectMemberJoined = "contacts.member.joined"
+	SubjectMemberLeft   = "contacts.member.left"
+)
+
+const (
+	SubjectUserAll     = "user.*"
+	SubjectContactsAll = "contacts.>"
+)
+
+// UserRegistered is published by AuthService after credentials are created for a user.
+type UserRegistered struct {
+	UserId    int32
+	Timestamp int64
+}
+
+type GroupCreated struct {
+	GroupId   int
+	GroupName string
+	TimeStamp int64
+}
+
+type GroupDeleted struct {
+	GroupId   int
+	TimeStamp int64
+}
+
+type MemberJoined struct {
+	GroupId   int
+	UserId    int
+	TimeStamp int64
+}
+
+type MemberLeft struct {
+	GroupId   int
+	UserId    int
+	TimeStamp int64
+}
+
+func (e UserRegistered) Subject() string {
+	return SubjectUserRegistered
+}
+
+func (e GroupCreated) Subject() string {
+	return SubjectGroupCreated
+}
+
+func (e GroupDeleted) Subject() string {
+	return SubjectGroupDeleted
+}
+
+func (e MemberJoined) Subject() string {
+	return SubjectMemberJoined
+}
+
+func (e MemberLeft) Subject() string {
+	return SubjectMemberLeft
+}
+
+type EventFactory func() Event
+
+var subjects = map[string]EventFactory{
+	SubjectUserRegistered: func() Event { return &UserRegistered{} },
+	SubjectGroupCreated:   func() Event { return &GroupCreated{} },
+	SubjectGroupDeleted:   func() Event { return &GroupDeleted{} },
+	SubjectMemberJoined:   func() Event { return &MemberJoined{} },
+	SubjectMemberLeft:     func() Event { return &MemberLeft{} },
+}
+
+func UnmarshalEvent(subject string, data []byte) (Event, error) {
+	factory, ok := subjects[subject]
+	if !ok {
+		return nil, fmt.Errorf("unknown subject: %s", subject)
+	}
+	event := factory()
+	if err := json.Unmarshal(data, event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}

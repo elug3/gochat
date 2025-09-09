@@ -8,7 +8,7 @@ const (
 )
 
 type ChatSummary struct {
-	ChatId        int      `json:"chat_id"`
+	ChatId        int      `json:"chatId,string"`
 	Type          ChatType `json:"type"`
 	Name          string   `json:"name"`
 	LastMessage   string   `json:"last_message"`
