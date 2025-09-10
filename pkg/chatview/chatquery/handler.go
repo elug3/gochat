@@ -13,7 +13,7 @@ type ChatViewHandler struct {
 }
 
 func registerRoutes(router *gin.Engine, h *ChatViewHandler) {
-	router.GET("/chats/:user_id", h.HandleListChats)
+	router.GET("/user/:user_id/chats", h.HandleListChats)
 }
 
 func NewHandler(chatview *ChatViewService) *ChatViewHandler {

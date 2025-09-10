@@ -35,3 +35,7 @@ func (s *ChatCommandHandler) OnMemberLeft(ctx context.Context, ev *events.Member
 	// return s.store.RemoveChatFromUser(ctx, ev.UserId, ev.GroupId, ev.TimeStamp)
 	return nil
 }
+
+func (s *ChatCommandHandler) OnMessageSent(ctx context.Context, ev *events.MessageSent) error {
+	return s.store.UpdateLastMessage(ctx, ev.ChatId, ev.Content, ev.TimeStamp)
+}

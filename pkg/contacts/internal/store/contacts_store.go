@@ -2,7 +2,7 @@ package store
 
 import (
 	"github.com/elug3/gochat/internal/services/contcts_service/access"
-	"github.com/elug3/gochat/internal/services/contcts_service/model"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
 )
 
 type ContactsStore interface {

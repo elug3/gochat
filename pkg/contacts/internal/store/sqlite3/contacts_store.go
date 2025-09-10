@@ -7,8 +7,8 @@ import (
 
 	"github.com/elug3/gochat/internal/services/contcts_service/access"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/store"
-	"github.com/elug3/gochat/internal/services/contcts_service/model"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -210,16 +210,11 @@ func (txc *TxContacts) CreateMember(groupId, userId int, role access.Role) (*mod
 }
 
 func (txc *TxContacts) GetMember(groupId, userId int) (*model.Member, error) {
-	if exists, err := txc.MemberExists(groupId, userId); !exists {
-		if err != nil {
-			return nil, err
-		}
-		// return nil, &store.Error{
-		// 	Kind:    store.KindMember,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("user '%d' not exists in group '%d'", userId, groupId),
-		// }
-	}
+	// if exists, err := txc.MemberExists(groupId, userId); !exists {
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	var member model.Member
 	err := txc.tx.QueryRow(`
@@ -230,6 +225,9 @@ func (txc *TxContacts) GetMember(groupId, userId int) (*model.Member, error) {
 		user_id = ?;
 	`, groupId, userId).Scan(&member.GroupId, &member.UserId, &member.CreatedAt, &member.Role)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errs.ErrNotFound
+		}
 		return nil, err
 	}
 	return &member, nil

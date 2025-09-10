@@ -5,23 +5,17 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/elug3/gochat/internal/message/model"
-	"github.com/elug3/gochat/internal/users/config"
-	"github.com/elug3/gochat/pkg/store"
+	"github.com/elug3/gochat/internal/message/internal/model"
+	"github.com/elug3/gochat/internal/message/internal/store"
+	_ "github.com/mattn/go-sqlite3"
 )
-
-func init() {
-	store.RegisterDriver("sqlite3", func(cfg *config.Config) (store.MessageStore, error) {
-		return NewMessageStore(cfg)
-	})
-}
 
 type MessageStore struct {
 	db *sql.DB
 }
 
-func NewMessageStore(cfg *config.Config) (*MessageStore, error) {
-	db, err := openDB(cfg)
+func NewMessageStore(saveDir string, noSave bool) (*MessageStore, error) {
+	db, err := openDB(saveDir, noSave)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open database: %w", err)
 	}
@@ -88,7 +82,7 @@ func (s *MessageStore) ListMessages(ctx context.Context, chatId int, options *st
 	}
 	defer rows.Close()
 
-	var messages []model.Message
+	messages := make([]model.Message, 0)
 	for rows.Next() {
 		var msg model.Message
 		if err := rows.Scan(&msg.Id, &msg.ChatId, &msg.Sender, &msg.Content, &msg.SentAt); err != nil {
@@ -121,13 +115,11 @@ func (s *MessageStore) DeleteMessage(ctx context.Context, messageId int) error {
 	return nil
 }
 
-func openDB(cfg *config.Config) (*sql.DB, error) {
-	var path string
-	if cfg.DB.NoSave {
-		path = ":memory:"
-	} else {
-		path = cfg.DB.SaveDir + "/message.db"
+func openDB(saveDir string, noSave bool) (*sql.DB, error) {
+	if noSave {
+		return sql.Open("sqlite3", ":memory:")
 	}
+	path := saveDir + "/messages.db"
 	return sql.Open("sqlite3", path)
 }
 

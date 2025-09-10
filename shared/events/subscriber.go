@@ -28,22 +28,43 @@ func NewSubscriber(natsUrl string) (*Subscriber, error) {
 	}, nil
 }
 
-func (s *Subscriber) Subscribe(subj string, handlerFn HandlerFn) error {
+func (s *Subscriber) SubscribeStream(stream, durable string, handler HandlerFn) error {
 	_, err := s.js.Subscribe(">", func(msg *nats.Msg) {
 		event, err := UnmarshalEvent(msg.Subject, msg.Data)
 		if err != nil {
+			fmt.Printf("failed to unmarshal event: %v\n", err)
 			msg.Nak()
 			return
 		}
-		if err := handlerFn(event); err != nil {
+		if err := handler(event); err != nil {
+			fmt.Printf("handler error: %v\n", err)
 			msg.Nak()
 			return
 		}
-		msg.Ack()
-
-	}, nats.Durable("contacts-subscriber"), nats.ManualAck(), nats.BindStream("CONTACTS"))
+		if err := msg.Ack(); err != nil {
+			fmt.Printf("failed to ack message: %v\n", err)
+			return
+		}
+	}, nats.Durable(durable), nats.ManualAck(), nats.BindStream(stream))
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to subject %s: %w", subj, err)
+		return err
 	}
 	return nil
+}
+
+func (s *Subscriber) SubscribeStreams(streams []string, durable string, handler HandlerFn) error {
+	for _, stream := range streams {
+		if err := s.SubscribeStream(stream, durable, handler); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Subscriber) Close() {
+	s.nc.Close()
+}
+
+func (s *Subscriber) Drain() error {
+	return s.nc.Drain()
 }

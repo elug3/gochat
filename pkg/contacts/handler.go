@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/elug3/gochat/internal/services/contcts_service/access"
 	"github.com/gin-gonic/gin"
 )
 
@@ -199,10 +200,41 @@ func (h *ContactsHandler) HandleRemoveGroupMember(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *ContactsHandler) HandleAccess(c *gin.Context) {
+	var req struct {
+		UserId   int    `form:"user_id" binding:"required"`
+		ChatId   int    `form:"chat_id"`
+		TargetId int    `form:"target_id"`
+		Action   string `form:"action"`
+	}
+	err := c.BindQuery(&req)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters"})
+		return
+	}
+	var errMsg string
+	can, action, err := h.contacts.Can(AccessRequest{
+		UserId:   req.UserId,
+		ChatId:   req.ChatId,
+		TargetId: req.TargetId,
+		Action:   access.Action(req.Action),
+	})
+	if err != nil {
+		errMsg = err.Error()
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"can":    can,
+		"action": action,
+		"error":  errMsg,
+	})
+}
+
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/groups", h.HandleListGroups)
 	router.GET("/groups/:group_id", h.HandleGetGroup)
+
+	router.GET("/can", h.HandleAccess)
 
 	router.GET("/user/:user_id/groups", h.HandleListUserGroup)
 	router.POST("/user/:user_id/groups", h.HandleCreateUserGroup)
@@ -229,4 +261,9 @@ func newContactsHandler(contacts *ContactsService) *ContactsHandler {
 
 func (h *ContactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.router.ServeHTTP(w, r)
+}
+
+func parseInt32(s string) (int32, error) {
+	i64, err := strconv.ParseInt(s, 10, 32)
+	return int32(i64), err
 }

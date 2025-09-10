@@ -5,9 +5,9 @@ import (
 
 	"github.com/elug3/gochat/internal/services/contcts_service/access"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/store"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/store/sqlite3"
-	"github.com/elug3/gochat/internal/services/contcts_service/model"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
 )
@@ -172,7 +172,11 @@ func (s *ContactsService) Invite(groupId, inviterId, inviteeId int) (*model.Memb
 	}
 	defer txc.Commit()
 
-	if !s.CanInvite(txc, groupId, inviterId) {
+	if ok, err := s.CanInvite(groupId, inviterId); err != nil || !ok {
+		if err != nil {
+			return nil, fmt.Errorf("failed to check permission: %w", err)
+		}
+		// permission denied
 		return nil, fmt.Errorf("user '%d' cannot invite members to group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
 	}
 	member, err := s.join(txc, groupId, inviteeId, access.RoleMember)
@@ -201,11 +205,7 @@ func (s *ContactsService) ListGroupMembers(groupId, userId int) ([]model.Member,
 		if err != nil {
 			return nil, fmt.Errorf("MemberExists: %w", err)
 		}
-		// return nil, &store.Error{
-		// 	Kind:    store.KindMember,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("user '%d' does not exist in group '%d'", userId, groupId),
-		// }
+		return nil, fmt.Errorf("user '%d' does not exist in group '%d'", userId, groupId)
 	}
 
 	members, err := txc.ListGroupMembers(groupId)
@@ -226,11 +226,7 @@ func (s *ContactsService) GetMember(groupId, userId, targetId int) (*model.Membe
 		if err != nil {
 			return nil, fmt.Errorf("MemberExists: %w", err)
 		}
-		// return nil, &store.Error{
-		// 	Kind:    store.KindMember,
-		// 	Err:     store.ErrNotFound,
-		// 	Message: fmt.Sprintf("user '%d' does not exist in group '%d'", userId, groupId),
-		// }
+		return nil, fmt.Errorf("user '%d' does not exist in group '%d'", userId, groupId)
 	}
 
 	m, err := txc.GetMember(groupId, targetId)
@@ -253,7 +249,7 @@ func (s *ContactsService) DeleteMember(groupId, userId, targetId int) error {
 			return err
 		}
 	} else {
-		if ok, err := s.canDeleteMember(txc, groupId, userId, targetId); !ok {
+		if ok, err := s.CanDeleteMember(groupId, userId, targetId); err != nil || !ok {
 			if err != nil {
 				return fmt.Errorf("failed to check permission: %w", err)
 			}
@@ -272,7 +268,7 @@ func (s *ContactsService) DeleteMember(groupId, userId, targetId int) error {
 }
 
 func (s *ContactsService) leave(txc store.TxContacts, groupId, userId int) error {
-	if ok, err := s.canLeave(txc, groupId, userId); !ok {
+	if ok, err := s.CanLeave(groupId, userId); !ok {
 		if err != nil {
 			return fmt.Errorf("failed to check permission: %w", err)
 		}
@@ -311,7 +307,7 @@ func (s *ContactsService) CreateProfile(userId int, name string) (*model.Profile
 	if err != nil {
 		return nil, err
 	}
-	defer txc.Commit()
+	defer txc.Rollback()
 
 	profile, err := txc.CreateProfile(userId, name)
 	if err != nil {
@@ -351,28 +347,37 @@ func (s *ContactsService) DeleteProfile(userId int) error {
 	return nil
 }
 
-func (s *ContactsService) CanInvite(txc store.TxContacts, groupId, inviterId int) bool {
+func (s *ContactsService) CanInvite(groupId, inviterId int) (bool, error) {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer txc.Rollback()
+
 	m, err := txc.GetMember(groupId, inviterId)
 	if err != nil {
-		return false
+		return false, nil
 	}
 
 	if access.Can(m.Role, m.Role, access.ActionInvite) {
-		return true
+		return true, nil
 	}
-	return false
+	return false, fmt.Errorf("user '%d' cannot invite members to group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
 }
 
 func (s *ContactsService) CanSend(groupId, userId int) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
-		return false, fmt.Errorf("Begin: %w", err)
+		return false, err
 	}
 	defer txc.Rollback()
 
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
-		return false, fmt.Errorf("GetMember: %w", err)
+		if err == errs.ErrNotFound {
+			return false, fmt.Errorf("user is not member of group: %w", errs.ErrPermissionDenied)
+		}
+		return false, err
 	}
 
 	if access.Can(m.Role, m.Role, access.ActionSend) {
@@ -384,12 +389,13 @@ func (s *ContactsService) CanSend(groupId, userId int) (bool, error) {
 func (s *ContactsService) CanRead(groupId, userId int) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
-		return false, fmt.Errorf("Begin: %w", err)
+		return false, err
 	}
 	defer txc.Rollback()
+
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
-		return false, fmt.Errorf("GetMember: %w", err)
+		return false, err
 	}
 	if access.Can(m.Role, m.Role, access.ActionRead) {
 		return true, nil
@@ -397,10 +403,16 @@ func (s *ContactsService) CanRead(groupId, userId int) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) canLeave(txc store.TxContacts, groupId, userId int) (bool, error) {
+func (s *ContactsService) CanLeave(groupId, userId int) (bool, error) {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer txc.Rollback()
+
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
-		return false, fmt.Errorf("GetMember: %w", err)
+		return false, err
 	}
 
 	if access.Can(m.Role, m.Role, access.ActionLeave) {
@@ -409,14 +421,54 @@ func (s *ContactsService) canLeave(txc store.TxContacts, groupId, userId int) (b
 	return false, nil
 }
 
-func (s *ContactsService) canDeleteMember(txc store.TxContacts, groupId, userId, targetId int) (bool, error) {
+func (s *ContactsService) CanDeleteMember(groupId, userId, targetId int) (bool, error) {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer txc.Rollback()
+
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
-		return false, fmt.Errorf("GetMember: %w", err)
+		return false, err
 	}
 
 	if access.Can(m.Role, m.Role, access.ActionDeleteMember) {
 		return true, nil
 	}
 	return false, nil
+}
+
+type AccessRequest struct {
+	UserId   int
+	ChatId   int
+	Action   access.Action
+	TargetId int // optional, used for actions that target another user
+}
+
+func (s *ContactsService) Can(req AccessRequest) (bool, access.Action, error) {
+	var (
+		can bool
+		act access.Action
+		err error
+	)
+	act = req.Action
+
+	switch req.Action {
+	case access.ActionInvite:
+		can, err = s.CanInvite(req.ChatId, req.TargetId)
+	case access.ActionSend:
+		can, err = s.CanSend(req.ChatId, req.UserId)
+	case access.ActionRead:
+		can, err = s.CanRead(req.ChatId, req.UserId)
+	case access.ActionLeave:
+		can, err = s.CanLeave(req.ChatId, req.UserId)
+	case access.ActionDeleteMember:
+		can, err = s.CanDeleteMember(req.ChatId, req.UserId, req.TargetId)
+	default:
+		can = false
+		act = ""
+		err = fmt.Errorf("unknown action: %q", req.Action)
+	}
+	return can, act, err
 }

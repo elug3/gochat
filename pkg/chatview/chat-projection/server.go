@@ -2,7 +2,6 @@ package chatcmd
 
 import (
 	"context"
-	"time"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
@@ -31,10 +30,11 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	log.Info().Msg("server started ...")
 	var err error
-	s.subc.Subscribe(events.SubjectContactsAll, func(event events.Event) error {
-		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		defer cancel()
 
+	s.subc.SubscribeStreams([]string{
+		"CONTACTS",
+		"MESSAGES",
+	}, "CHATVIEW", func(event events.Event) error {
 		switch ev := event.(type) {
 		case *events.GroupCreated:
 			err = s.handler.OnGroupCreated(ctx, ev)
@@ -44,14 +44,28 @@ func (s *ChatProjectionServer) Run(ctx context.Context) error {
 			err = s.handler.OnMemberJoined(ctx, ev)
 		case *events.MemberLeft:
 			err = s.handler.OnMemberLeft(ctx, ev)
+		case *events.MessageSent:
+			err = s.handler.OnMessageSent(ctx, ev)
+		default:
+			log.Warn().Msgf("unknown event type: %T", event)
 		}
 		if err != nil {
-			log.Error().Err(err).Msgf("failed to handle event: %s", event.Subject())
+			log.Error().Err(err).Msgf("failed to handle event: %T", event)
 			return err
 		}
 		log.Info().Msgf("event handled: %s", event.Subject())
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
 	<-ctx.Done()
+	log.Info().Msg("shutting down server ...")
+	if err := s.subc.Drain(); err != nil {
+		return err
+	}
+	s.subc.Close()
+	log.Info().Msg("server shut down")
 	return nil
 }

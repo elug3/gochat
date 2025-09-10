@@ -8,7 +8,13 @@ import (
 	"github.com/elug3/gochat/pkg/chatview/chatquery"
 )
 
-var usageStr = ``
+var usageStr = `
+Usage:
+  -p, --port string       Port to run the server on (default "8080")
+  -H, --host string       Host to run the server on (default "localhost")
+  -db-url string          Database connection URL (default: redis://localhost:6379)
+  -v, --version           Show version information
+`
 
 func printUsage() {
 	println(usageStr)
@@ -29,5 +35,8 @@ func main() {
 		fmt.Printf("cannot create server: %v\n", err)
 		os.Exit(1)
 	}
-	srv.ListenAndServe()
+	if err = srv.ListenAndServe(); err != nil {
+		fmt.Printf("cannot start server: %v\n", err)
+		os.Exit(1)
+	}
 }

@@ -7,7 +7,7 @@ import (
 
 	contacts "github.com/elug3/gochat/internal/services/contcts_service"
 	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
-	"github.com/elug3/gochat/internal/services/contcts_service/model"
+	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
 )
 
 func TestContacts_CreateProfile(t *testing.T) {

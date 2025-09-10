@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/elug3/gochat/internal/message/model"
+	"github.com/elug3/gochat/internal/message/internal/model"
 )
 
 type MessageOptions struct {

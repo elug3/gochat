@@ -13,7 +13,7 @@ Usage: gochat-contacts_server [option]
 	Server Options:
 	-H --host <host>        Server host (default: "0.0.0.0")
 	-P --port <port>        Server port (default: "8080")
-	-d --data <data_dir>    Data directory (default: "./data")
+	-d --data <data_dir>    Data directory (default: "./ ")
 	--help                  Show this message
 
 	-nats <nats_url>        NATS server URL (default: "nats://localhost:4222")

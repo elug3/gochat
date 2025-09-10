@@ -7,12 +7,12 @@ type Action string
 type Role string
 
 const (
-	ActionRead         Action = "read message"
-	ActionSend         Action = "send message"
+	ActionRead         Action = "read"
+	ActionSend         Action = "send"
 	ActionInvite       Action = "invite"
 	ActionLeave        Action = "leave"
-	ActionDeleteMember Action = "delete member"
-	ActionDeleteGroup  Action = "delete group"
+	ActionDeleteMember Action = "delete_member"
+	ActionDeleteGroup  Action = "delete_group"
 )
 
 const (

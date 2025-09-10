@@ -42,15 +42,18 @@ func (store *ChatViewStore) ListByUserId(ctx context.Context, userId int32) ([]m
 	if errStr := jr.Get("err").String(); errStr != "" {
 		return nil, errors.New(errStr)
 	}
-	var chats []model.ChatSummary
-	for _, v := range jr.Get("chats").Array() {
-		var chat model.ChatSummary
-		err := json.Unmarshal([]byte(v.Raw), &chat)
-		if err != nil {
-			return nil, err
-		}
 
-		chats = append(chats, chat)
+	chats := make([]model.ChatSummary, 0)
+	if jr.Get("chats").IsArray() {
+		for _, v := range jr.Get("chats").Array() {
+			var chat model.ChatSummary
+			err := json.Unmarshal([]byte(v.Raw), &chat)
+			if err != nil {
+				return nil, err
+			}
+
+			chats = append(chats, chat)
+		}
 	}
 
 	return chats, nil
