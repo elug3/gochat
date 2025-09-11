@@ -10,8 +10,20 @@
                 {
                     "method": "POST",
                     "url_pattern": "/register",
-
-                    "host": ["localhost:8000"]
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/login",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "input_headers": ["Authorization"],
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/login",
+                    "host": ["auth:8080"]
                 }
             ]
         },
@@ -27,7 +39,7 @@
                         "api"
                     ],
                     "disable_jwk_security": true,
-                    "jwk_url": "http://localhost:8000/.well-known/jwks.json",
+                    "jwk_url": "http://auth/.well-known/jwks.json",
                     "cache": false
                 }
             },
@@ -35,7 +47,128 @@
                 {
                     "method": "GET",
                     "url_pattern": "/user",
-                    "host": ["localhost:8001"]
+                    "host": ["user:8080"]
+
+                }
+            ]
+        },
+        {
+            "endpoint": "/groups",
+            "@comment": "List all groups of the authenticated user",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            },
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/groups",
+                    "host": ["contacts:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/groups",
+            "@comment": "Create a new group",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            },
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/user/{JWT.sub}/groups",
+                    "host": ["contacts:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/groups/{groupId}/members",
+            "@comment": "Get all members of a group",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            },
+            "method": "GET",
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/groups/{groupId}/members",
+                    "host": ["contacts:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/groups/{groupId}/members",
+            "@comment": "Add a new member to a group",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            },
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/user/{JWT.sub}/groups/{groupId}/members",
+                    "host": ["contacts:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/groups/{groupId}/members/{memberId}",
+            "@comment": "Remove a member from a group",
+            "method": "DELETE",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false 
+                }  
+            },
+            "backend": [
+                {
+                    "method": "DELETE",
+                    "url_pattern": "/user/{JWT.sub}/groups/{groupId}/members/{memberId}",
+                    "host": ["contacts:8080"]   
                 }
             ]
         }

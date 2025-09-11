@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/elug3/gochat/internal/message/internal/model"
-	"github.com/elug3/gochat/internal/message/internal/store"
+	"github.com/elug3/gochat/pkg/message/internal/model"
+	"github.com/elug3/gochat/pkg/message/internal/store"
 	_ "github.com/mattn/go-sqlite3"
 )
 

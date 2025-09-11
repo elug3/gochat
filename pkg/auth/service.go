@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -46,9 +47,17 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 
 func NewAuthService(opts *Options) (*AuthService, error) {
 	// Load private key
-	jwtKey, err := loadPrivateKey(opts.KeyPath)
+	var jwtKey *rsa.PrivateKey
+	var err error
+
+	if opts.UseTmpKey {
+		log.Warn().Msg("using temporary RSA key, not recommended for production")
+		jwtKey, err = rsa.GenerateKey(rand.Reader, 2048)
+	} else {
+		jwtKey, err = loadPrivateKey(opts.KeyPath)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to load private key: %w", err)
+		return nil, fmt.Errorf("failed to load RSA private key: %w", err)
 	}
 
 	// Create JWKs

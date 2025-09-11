@@ -14,7 +14,7 @@ type AuthHandler struct {
 
 func registerRoutes(r gin.IRouter, h *AuthHandler) {
 
-	r.GET("/login", h.HandleLogin)
+	r.POST("/login", h.HandleLogin)
 	r.POST("/register", h.HandleRegister)
 	r.GET("/.well-known/jwks.json", h.HandleJwks)
 }

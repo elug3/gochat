@@ -1,16 +1,39 @@
 version: '3'
 services:
+  nats-server:
+    image: nats:2.11
+    container_name: nats
+    command: ["-js"]
 
   contacts:
     build: ./cmd/gochat-contacts_server
-    
+    container_name: gochat-contacts_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+  auth:
+    build: ./cmd/gochat-auth_server
+    container_name: gochat-auth_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+      
+    depends_on:
+      - nats-server
+  chatcmd:
+    build: ./cmd/gochat-chat_projection_server
+    container_name: gochat-chat_projection_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
 
   krakend:
     image: krakend:2.10
     container_name: krakend
-    network_mode: "host"
     volumes:
       - ./krakend.json:/etc/krakend/krakend.json
+    ports:
+      - "8080:8080"
     command: ["run", "-c", "/etc/krakend/krakend.json", "-d"]
-
   

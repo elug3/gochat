@@ -1,13 +1,18 @@
 package auth
 
-import "flag"
+import (
+	"flag"
+
+	"github.com/rs/zerolog/log"
+)
 
 type Options struct {
 	Host string
 	Port string
 
 	// Path to RSA private key in PEM format
-	KeyPath string
+	KeyPath   string
+	UseTmpKey bool
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -23,18 +28,27 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Server host")
 	fs.StringVar(&opts.Port, "p", "8080", "Server port")
 
-	fs.StringVar(&opts.KeyPath, "k", "jwt.key", "Path to RSA private key in PEM format (default './jwt.key')")
+	fs.StringVar(&opts.KeyPath, "secret", "", "Path to RSA private key in PEM format")
+	fs.BoolVar(&opts.UseTmpKey, "tmpkey", false, "Use temporary key")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
 	if showVersion {
+		// Print version information
 	}
 
 	if showHelp {
 		fs.Usage()
 		return nil, nil
+	}
+
+	if opts.KeyPath == "" && !opts.UseTmpKey {
+		log.Warn().Msg("no key path provided, using temporary key")
+		opts.UseTmpKey = true
+	} else {
+		log.Info().Msg("using provided key path")
 	}
 
 	return &opts, nil

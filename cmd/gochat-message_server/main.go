@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/elug3/gochat/internal/message"
+	"github.com/elug3/gochat/pkg/message"
 )
 
 var usageStr = `

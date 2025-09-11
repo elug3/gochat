@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	httpclient "github.com/elug3/gochat/api/http"
-	"github.com/elug3/gochat/internal/message/internal/errs"
-	"github.com/elug3/gochat/internal/message/internal/model"
-	"github.com/elug3/gochat/internal/message/internal/store"
-	"github.com/elug3/gochat/internal/message/internal/store/sqlite3"
+	"github.com/elug3/gochat/pkg/message/internal/errs"
+	"github.com/elug3/gochat/pkg/message/internal/model"
+	"github.com/elug3/gochat/pkg/message/internal/store"
+	"github.com/elug3/gochat/pkg/message/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
 )
 
