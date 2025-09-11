@@ -3,11 +3,11 @@ package contacts
 import (
 	"fmt"
 
-	"github.com/elug3/gochat/internal/services/contcts_service/access"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/store"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/store/sqlite3"
+	"github.com/elug3/gochat/pkg/contacts/access"
+	"github.com/elug3/gochat/pkg/contacts/internal/errs"
+	"github.com/elug3/gochat/pkg/contacts/internal/model"
+	"github.com/elug3/gochat/pkg/contacts/internal/store"
+	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
 )

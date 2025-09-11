@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/elug3/gochat/internal/services/contcts_service/access"
+	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/gin-gonic/gin"
 )
 

@@ -1,4 +1,4 @@
-module github.com/elug3/gochat/internal/services/contcts_service
+module github.com/elug3/gochat/pkg/contacts
 
 go 1.24.6
 

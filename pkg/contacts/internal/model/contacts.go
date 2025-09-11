@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/elug3/gochat/internal/services/contcts_service/access"
+	"github.com/elug3/gochat/pkg/contacts/access"
 )
 
 type Profile struct {

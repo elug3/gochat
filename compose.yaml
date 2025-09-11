@@ -1,12 +1,16 @@
 version: '3'
 services:
+
+  contacts:
+    build: ./cmd/gochat-contacts_server
+    
+
   krakend:
     image: krakend:2.10
     container_name: krakend
     network_mode: "host"
     volumes:
       - ./krakend.json:/etc/krakend/krakend.json
-      - ./api/grpc:/etc/krakend/grpcatalog
     command: ["run", "-c", "/etc/krakend/krakend.json", "-d"]
 
   

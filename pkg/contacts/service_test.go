@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	contacts "github.com/elug3/gochat/internal/services/contcts_service"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/errs"
-	"github.com/elug3/gochat/internal/services/contcts_service/internal/model"
+	"github.com/elug3/gochat/pkg/contacts"
+	"github.com/elug3/gochat/pkg/contacts/internal/errs"
+	"github.com/elug3/gochat/pkg/contacts/internal/model"
 )
 
 func TestContacts_CreateProfile(t *testing.T) {

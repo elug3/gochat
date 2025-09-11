@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	contacts "github.com/elug3/gochat/internal/services/contcts_service"
+	"github.com/elug3/gochat/pkg/contacts"
 )
 
 var usageStr = `

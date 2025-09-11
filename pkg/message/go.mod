@@ -1,4 +1,4 @@
-module github.com/elug3/gochat/internal/message
+module github.com/elug3/gochat/pkg/message
 
 go 1.24.6
 
