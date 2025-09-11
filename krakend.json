@@ -52,6 +52,9 @@
                 }
             ]
         },
+
+
+        
         {
             "endpoint": "/groups",
             "@comment": "List all groups of the authenticated user",
@@ -172,6 +175,61 @@
                 }
             ]
         },
+
+
+
+        {
+            "endpoint": "/messages",
+            "@comment": "Send a message to a chat",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false  
+                }  
+            },
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/user/{JWT.sub}/messages",
+                    "host": ["messages:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/chats/{chatId}/messages",
+            "@comment": "Get all messages from a chat",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false  
+                }  
+            },
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/chats/{chatId}/messages",
+                    "host": ["chatview:8080"]
+                }
+            ]
+        },
+
+
+
+
         {
             "endpoint": "/chats",
             "@comment": "List all chats of the authenticated user",

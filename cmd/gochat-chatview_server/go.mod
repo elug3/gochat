@@ -1,4 +1,4 @@
-module github.com/elug3/gochat/cmd/gochat-chatview-server
+module github.com/elug3/gochat/cmd/gochat-chatview_server
 
 go 1.24.6
 

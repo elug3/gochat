@@ -17,21 +17,33 @@ services:
     container_name: gochat-auth_server
     environment:
       - NATS_URL=nats://nats-server:4222
-      
     depends_on:
       - nats-server
   chatcmd:
     build: ./cmd/gochat-chatcmd_server
     container_name: gochat-chatcmd_server
     environment:
-      - REDIS_URL
+      - DB_URL=chatview-db:6379
       - NATS_URL=nats://nats-server:4222
     depends_on:
+      - chatview-db
       - nats-server
   chatview:
     build: ./cmd/gochat-chatview_server
     container_name: gochat-chatview_server
     environment:
+      - DB_URL=chatview-db:6379
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+      - chatview-db
+
+
+  messages:
+    build: ./cmd/gochat-message_server
+    container_name: gochat-message_server
+    environment:
+      - CONTACTS_SERVER=contacts:8080
       - NATS_URL=nats://nats-server:4222
     depends_on:
       - nats-server
@@ -44,4 +56,8 @@ services:
     ports:
       - "8080:8080"
     command: ["run", "-c", "/etc/krakend/krakend.json", "-d"]
+
+  chatview-db:
+    image: redis:8.2
+    container_name: chatview-db
   

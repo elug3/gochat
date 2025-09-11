@@ -1,6 +1,5 @@
 local chatId   = KEYS[1]
-local name     = ARGV[1] or ""After making a commit that meets the requirements to count as a contribution, you may need to wait for up to 24 hours to see the contribution appear on your contributions graph. For more information, see Troubleshooting commits on your timeline.
-Your local Git commit email isn't connected to your account
+local name     = ARGV[1] or ""
 local ts       = ARGV[2] or "0"
 
 assert(chatId ~= "", "chatId required")

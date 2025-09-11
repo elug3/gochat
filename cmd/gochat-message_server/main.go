@@ -12,11 +12,11 @@ var usageStr = `
 Usage: gochat-message_server [options]
 	Server Options:
 		-port <port>               Port to run the server on (default: 8080)
-		-host <host>               Host to run the server on (default: localhost)
+		-host <host>               Host to run the server on (default: 0.0.0.0)
 		-save-dir <dir>           Directory to save data (default: ./ )
 		-no-save                  Run in no-save mode (data will not be persisted) (default: false)
 		-nats-url <url>           URL for the NATS server (default: nats://localhost:4222)
-		-contacts-url <url>       URL for the contacts service (default: localhost:8002)
+		-contacts-server <host>       Host for the contacts service (default: localhost:8080)
 `
 
 func printUsage() {
@@ -37,7 +37,6 @@ func main() {
 		fmt.Printf("Error creating server: %v\n", err)
 		os.Exit(1)
 	}
-
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)

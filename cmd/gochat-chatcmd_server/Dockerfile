@@ -1,12 +1,21 @@
-FROM golang:1.25.1-alpine   
+# COPY go.mod go.sum* ./
+# RUN go mod download
 
-WORKDIR /app
+# COPY *.go ./
 
-COPY go.mod go.sum* ./
-RUN go mod download
+# RUN go build
 
-COPY *.go ./
+# CMD ["./gochat-chatcmd_server"]
 
-RUN go build
+
+FROM gcr.io/distroless/base
+# TODO: use go build
+
+
+
+COPY gochat-chatcmd_server ./gochat-chatcmd_server
+
+EXPOSE 8080
+ENTRYPOINT ["./gochat-chatcmd_server"] 
 
 CMD ["./gochat-chatcmd_server"]

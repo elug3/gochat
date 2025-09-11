@@ -14,7 +14,7 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	opts := &Options{}
 
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "NATS server URL (default: nats://localhost:4222)")
-	fs.StringVar(&opts.DatabaseUrl, "db", "localhost:6379", "Database server URL (default: localhost:6379)")
+	fs.StringVar(&opts.DatabaseUrl, "db-url", "", "Database server URL (default: localhost:6379)")
 
 	err := fs.Parse(args)
 	if err != nil {
@@ -26,6 +26,13 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 			opts.NatsUrl = envVal
 		} else {
 			opts.NatsUrl = "nats://localhost:4222"
+		}
+	}
+	if opts.DatabaseUrl == "" {
+		if envVal := os.Getenv("DB_URL"); envVal != "" {
+			opts.DatabaseUrl = envVal
+		} else {
+			opts.DatabaseUrl = "localhost:6379"
 		}
 	}
 

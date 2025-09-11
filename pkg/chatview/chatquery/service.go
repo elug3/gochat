@@ -13,7 +13,7 @@ type ChatViewService struct {
 }
 
 func NewChatViewService(opts *Options) (*ChatViewService, error) {
-	store, err := redisstore.NewChatViewStore()
+	store, err := redisstore.NewChatViewStore(opts.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}

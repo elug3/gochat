@@ -16,9 +16,9 @@ type ChatViewStore struct {
 	rdb *redis.Client
 }
 
-func NewChatViewStore() (*ChatViewStore, error) {
+func NewChatViewStore(dbUrl string) (*ChatViewStore, error) {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: dbUrl,
 	})
 	err := rdb.Ping(context.TODO()).Err()
 	if err != nil {
