@@ -8,4 +8,5 @@ RUN go mod download
 COPY *.go ./
 
 RUN go build
-CMD ["./app/gochat-chat_projection_server"]
+
+CMD ["./gochat-chatcmd_server"]

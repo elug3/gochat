@@ -21,8 +21,16 @@ services:
     depends_on:
       - nats-server
   chatcmd:
-    build: ./cmd/gochat-chat_projection_server
-    container_name: gochat-chat_projection_server
+    build: ./cmd/gochat-chatcmd_server
+    container_name: gochat-chatcmd_server
+    environment:
+      - REDIS_URL
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+  chatview:
+    build: ./cmd/gochat-chatview_server
+    container_name: gochat-chatview_server
     environment:
       - NATS_URL=nats://nats-server:4222
     depends_on:

@@ -171,6 +171,30 @@
                     "host": ["contacts:8080"]   
                 }
             ]
+        },
+        {
+            "endpoint": "/chats",
+            "@comment": "List all chats of the authenticated user",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false 
+                }
+            },
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/chats",
+                    "host": ["chatview:8080"]
+                }
+            ]
         }
     ]
 }

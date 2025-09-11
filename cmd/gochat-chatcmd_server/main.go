@@ -19,9 +19,16 @@ Server Options:
 	--nats url	NATS server URL (default: nats://localhost:4222)
 `
 
+func printUsage() {
+	fmt.Printf("%s\n", usageStr)
+}
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	fs := flag.NewFlagSet("gochat-chatview_server", flag.ExitOnError)
+	fs.Usage = printUsage
+
 	opts, err := chatcmd.ConfigureOptions(fs, os.Args[1:])
 	if err != nil {
 		fmt.Printf("error configuring options: %v\n", err)
