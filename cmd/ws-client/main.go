@@ -2,29 +2,43 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/elug3/gochat/api/httpclient"
 	"github.com/elug3/gochat/cmd/ws-client/console"
-	"github.com/elug3/gochat/pkg/client"
 )
 
-var api *client.Api
+var usageStr = `
+Usage: ws-client [options]
+
+Options:
+	-h, --help          Show this help message and exit
+	-t, --token TOKEN   API token (or set the GOCHAT_API_TOKEN environment variable)
+	-u, --url URL       Base URL of the API (default: http://localhost:8080)
+	--ws, URL 	  WebSocket URL of the API (default: ws://localhost:8080/ws)
+`
+
+func printUsage() {
+	fmt.Println(usageStr)
+}
+
+var api *httpclient.Api
 
 func main() {
-	var err error
-	apiToken := os.Getenv("GOCHAT_API_TOKEN")
-	if apiToken == "" {
-		fmt.Println("$GOCHAT_API_TOKEN environment variable is not set.")
-		return
-	}
-	api, err = client.New(client.DefaultUrl, apiToken)
+	fs := flag.NewFlagSet("ws-client", flag.ExitOnError)
+	fs.Usage = printUsage
+
+	opts, err := httpclient.ConfigureOptions(fs, os.Args[1:])
 	if err != nil {
-		fmt.Println("Error initializing client:", err)
+		fmt.Printf("Error parsing options: %v\n", err)
 		return
 	}
+
+	api = httpclient.NewApi(opts...)
 
 	ctx := context.Background()
 	if ok, err := api.IsAuthenticated(ctx); !ok {

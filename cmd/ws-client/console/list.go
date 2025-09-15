@@ -145,6 +145,9 @@ func (l List) goPrev() (tea.Model, tea.Cmd) {
 }
 
 func (l List) View() string {
+	if l.err != nil {
+		return fmt.Sprintf("Error: %v\nPress 'r' to retry or 'q' to quit.\n", l.err)
+	}
 	if len(l.Items) == 0 {
 		return "No items found."
 	}

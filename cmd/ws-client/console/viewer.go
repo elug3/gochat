@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -12,7 +13,7 @@ import (
 
 type Content struct {
 	Id     int
-	Sender int
+	Sender int32
 	Time   time.Time
 	Text   string
 }
@@ -31,7 +32,7 @@ type Viewer struct {
 }
 
 func newViewer() *Viewer {
-	vp := viewport.New(0, 0)
+	vp := viewport.New(30, 20)
 	ta := textarea.New()
 
 	v := Viewer{
@@ -52,6 +53,7 @@ func NewViewer(prev tea.Model, contents []Content) (*Viewer, tea.Cmd) {
 func NewViewerWithLoader(prev tea.Model, loadFn func(context.Context) ([]Content, error)) (*Viewer, tea.Cmd) {
 	v := newViewer()
 	v.loadFn = loadFn
+	v.prev = prev
 
 	return v, v.Init()
 }
@@ -77,14 +79,17 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch data := msg.data.(type) {
 		case []Content:
 			v.contents = data
-			var s string
+			var b strings.Builder
 			for _, c := range v.contents {
-				s += fmt.Sprintf("%s: %s", c.Time.Format(time.RFC3339), c.Text)
+				b.WriteString(fmt.Sprintf("%s: %s\n", c.Time.Format(time.RFC3339), c.Text))
 			}
-			v.vp.SetContent(s)
+			v.vp.SetContent(b.String())
 			v.vp.GotoBottom()
 			return v, nil
 		}
+	case tea.WindowSizeMsg:
+		v.vp.Width = msg.Width
+		v.vp.Height = msg.Height - 2
 
 	case tea.KeyMsg:
 		if v.focus {
@@ -106,6 +111,9 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return v, nil
 
 			case "q", "left":
+				if v.prev == nil {
+					return v, tea.Quit
+				}
 				return v.prev, nil
 
 			}
@@ -119,13 +127,6 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *Viewer) View() string {
-	if v.err != nil {
-		return fmt.Sprintf("Error: %v", v.err)
-	}
-	if len(v.contents) != 0 {
-	} else {
-		v.ta.SetValue("No messages to display.")
-	}
 	return fmt.Sprintf("%s\n%s",
 		v.vp.View(),
 		v.ta.View(),

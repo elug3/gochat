@@ -7,12 +7,12 @@ import (
 )
 
 type Options struct {
-	Port               string
-	Host               string
-	SaveDir            string
-	NoSave             bool
-	NatsUrl            string
-	ContactsServiceUrl string
+	Port              string
+	Host              string
+	SaveDir           string
+	NoSave            bool
+	NatsUrl           string
+	ContactsServerUrl string
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -23,7 +23,7 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.StringVar(&opts.SaveDir, "save-dir", "./", "Directory to save data")
 	fs.BoolVar(&opts.NoSave, "no-save", false, "Run in no-save mode (data will not be persisted)")
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "URL for the NATS server (default: nats://localhost:4222)")
-	fs.StringVar(&opts.ContactsServiceUrl, "contacts-server", "", "Host for the contacts service")
+	fs.StringVar(&opts.ContactsServerUrl, "contacts-server", "", "Host for the contacts server")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -37,9 +37,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 		}
 	}
 
-	if opts.ContactsServiceUrl == "" {
+	if opts.ContactsServerUrl == "" {
 		if envVar := os.Getenv("CONTACTS_SERVER"); envVar != "" {
-			opts.ContactsServiceUrl = envVar
+			opts.ContactsServerUrl = envVar
 		} else {
 			return nil, fmt.Errorf("contacts-server option or CONTACTS_SERVER environment variable must be set")
 		}

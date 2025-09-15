@@ -204,7 +204,7 @@
         },
         {
             "endpoint": "/chats/{chatId}/messages",
-            "@comment": "Get all messages from a chat",
+            "@comment": "Get all messages from a messages",
             "method": "GET",
             "output_encoding": "no-op",
             "extra_config": {
@@ -221,8 +221,8 @@
             "backend": [
                 {
                     "method": "GET",
-                    "url_pattern": "/user/{JWT.sub}/chats/{chatId}/messages",
-                    "host": ["chatview:8080"]
+                    "url_pattern": "/user/{JWT.sub}/chat/{chatId}/messages",
+                    "host": ["messages:8080"]
                 }
             ]
         },

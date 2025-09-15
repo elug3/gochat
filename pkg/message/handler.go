@@ -64,9 +64,33 @@ func (h *MessageHandler) HandleUserSendMessage(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, msg)
 }
 
+func (h *MessageHandler) HandleUserListMessage(c *gin.Context) {
+	userIdStr := c.Param("user_id")
+	userId, err := strconv.Atoi(userIdStr)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+		return
+	}
+
+	chatIdStr := c.Param("chat_id")
+	chatId, err := strconv.Atoi(chatIdStr)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid chat_id"})
+		return
+	}
+
+	msgs, err := h.Messages.ListUserChatMessages(c.Request.Context(), chatId, userId)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, msgs)
+}
+
 func RegisterRoutes(router *gin.Engine, h *MessageHandler) {
 	router.GET("/chat/:chat_id/messages", h.HandleListMessages)
 
+	router.GET("/user/:user_id/chat/:chat_id/messages", h.HandleUserListMessage)
 	router.POST("/user/:user_id/messages", h.HandleUserSendMessage)
 }
 

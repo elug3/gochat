@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	httpclient "github.com/elug3/gochat/api/http"
+	"github.com/elug3/gochat/api/httpclient"
 	"github.com/elug3/gochat/pkg/message/internal/errs"
 	"github.com/elug3/gochat/pkg/message/internal/model"
 	"github.com/elug3/gochat/pkg/message/internal/store"
@@ -29,7 +29,9 @@ func NewMessageService(opts *Options) (*MessageService, error) {
 		return nil, fmt.Errorf("cannot create event publisher: %w", err)
 	}
 
-	contactsClient := httpclient.NewContactsClient(opts.ContactsServiceUrl)
+	contactsClient := httpclient.NewContactsClient(
+		httpclient.WithBaseUrl(opts.ContactsServerUrl),
+	)
 	s := MessageService{
 		store:    store,
 		pub:      pub,
@@ -85,22 +87,23 @@ func (s *MessageService) ListMessages(ctx context.Context, chatId int) ([]model.
 }
 
 // ListUserChatMessages gets messages for a chat with permission checks
-func (s *MessageService) ListUserChatMessages(ctx context.Context, groupId, userId int) ([]model.Message, error) {
+func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId, userId int) ([]model.Message, error) {
 	ctx, cancel := s.store.WithContext(ctx)
 	defer cancel()
 
-	if can, _, err := s.contacts.Can(httpclient.AccessRequestParams{
-		ChatId: groupId,
+	resp, err := s.contacts.Can(ctx, httpclient.AccessRequestParams{
+		ChatId: chatId,
 		UserId: userId,
 		Action: "read", // TODO: use constant
-	}); !can {
-		if err != nil {
-			return nil, fmt.Errorf("faild to check permissions: %w", err)
-		}
-		return nil, fmt.Errorf("cannot list messages: %w", errs.PermissionDenied)
-
+	})
+	if err != nil {
+		return nil, err
 	}
-	messages, err := s.store.ListMessages(ctx, groupId, &store.MessageOptions{
+	if !resp.Can {
+		return nil, fmt.Errorf("cannot list messages: %w", errs.PermissionDenied)
+	}
+
+	messages, err := s.store.ListMessages(ctx, chatId, &store.MessageOptions{
 		Limit:  50,
 		Offset: 0,
 	})
@@ -114,14 +117,15 @@ func (s *MessageService) sendToGroup(ctx context.Context, userId, chatId int, co
 	ctx, cancel := s.store.WithContext(ctx)
 	defer cancel()
 
-	if can, _, err := s.contacts.Can(httpclient.AccessRequestParams{
+	resp, err := s.contacts.Can(ctx, httpclient.AccessRequestParams{
 		ChatId: chatId,
 		UserId: userId,
 		Action: "send", // TODO: use constant
-	}); !can {
-		if err != nil {
-			return nil, err
-		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.Can {
 		return nil, fmt.Errorf("cannot send message: %w", errs.PermissionDenied)
 	}
 
