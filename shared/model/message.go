@@ -3,9 +3,9 @@ package model
 import "time"
 
 type Message struct {
-	ChatId  int
-	Sender  int32
-	Content string
-	Id      int
-	SentAt  time.Time
+	ChatId  int       `json:"chat_id,omitempty"`
+	Sender  int32     `json:"sender,omitempty"`
+	Content string    `json:"content,omitempty"`
+	Id      int       `json:"id,omitempty"`
+	SentAt  time.Time `json:"sent_at,omitempty"`
 }

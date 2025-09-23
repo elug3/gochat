@@ -15,11 +15,19 @@ type AuthStore struct {
 	db *sql.DB
 }
 
-func NewAuthStore() (*AuthStore, error) {
-	db, err := sql.Open("sqlite3", "./auth.db")
+func NewAuthStore(saveDir string, inMemory bool) (*AuthStore, error) {
+	var db *sql.DB
+	var path string
+	if inMemory {
+		path = ":memory:"
+	} else {
+		path = saveDir + "/auth.db"
+	}
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, err
 	}
+
 	if err = initdb(db); err != nil {
 		db.Close()
 		return nil, err

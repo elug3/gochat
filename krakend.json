@@ -28,6 +28,32 @@
             ]
         },
         {
+            "endpoint": "/auth/ws",
+            "method": "POST",
+            "input_headers": ["Authorization"],
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/ws",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/auth/ws",
+            "method": "GET",
+            "input_query_strings": ["token"],
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/ws",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
             "endpoint": "/user",
             "method": "GET",
             "extra_config": {

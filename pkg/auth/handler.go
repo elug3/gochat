@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -17,6 +18,9 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.POST("/login", h.HandleLogin)
 	r.POST("/register", h.HandleRegister)
 	r.GET("/.well-known/jwks.json", h.HandleJwks)
+
+	r.GET("/ws", h.HandleUseWsToken)
+	r.POST("/ws", h.HandleCreateWsToken)
 }
 
 func Logger() gin.HandlerFunc {
@@ -90,4 +94,46 @@ func (h *AuthHandler) HandleJwks(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Status(http.StatusOK)
 	c.Writer.Write(jwksData)
+}
+
+func (h *AuthHandler) HandleCreateWsToken(c *gin.Context) {
+	token, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+	wsToken, err := h.auth.CreateWsToken(c.Request.Context(), token)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"ws_token": wsToken,
+	})
+}
+
+func (h *AuthHandler) HandleUseWsToken(c *gin.Context) {
+	token := c.Request.URL.Query().Get("token")
+	if token == "" {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "missing token query parameter"})
+		return
+	}
+	userId, err := h.auth.UseWsToken(c.Request.Context(), token)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"user_id": userId,
+	})
+
+}
+
+func parseBearerToken(r *http.Request) (string, bool) {
+	authHeader := r.Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return "", false
+	}
+	return parts[1], true
 }

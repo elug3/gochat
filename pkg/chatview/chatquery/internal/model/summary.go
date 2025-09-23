@@ -8,13 +8,13 @@ const (
 )
 
 type ChatSummary struct {
-	ChatId        int      `json:"chatId,string"`
+	Id            int      `json:"id"`
 	Type          ChatType `json:"type"`
 	Name          string   `json:"name"`
-	LastMessage   string   `json:"lastMessage"`
-	LastMessageAt int64    `json:"lastMessageAt,string"`
-	LastSenderId  int      `json:"lastSenderId"`
-	UnreadCount   int      `json:"unreadCount,string"`
+	LastMessage   string   `json:"last_message"`
+	LastMessageAt int64    `json:"last_message_at"`
+	LastSenderId  int      `json:"last_sender_id"`
+	UnreadCount   int      `json:"unread_count"`
 	Pinned        bool     `json:"pinned"`
 	Muted         bool     `json:"muted"`
 }

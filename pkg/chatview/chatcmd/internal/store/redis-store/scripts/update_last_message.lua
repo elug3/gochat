@@ -20,8 +20,8 @@ local metaKey = "chats:" .. chatId .. ":meta"
 -- end
 
 redis.call("HSET", metaKey,
-"lastMessage", lastMessage,
-"lastMessageAt", lastMessageAt
+"last_message", lastMessage,
+"last_message_at", lastMessageAt
 )
 
 local seq = redis.call("HINCRBY", metaKey, "seq", 1)

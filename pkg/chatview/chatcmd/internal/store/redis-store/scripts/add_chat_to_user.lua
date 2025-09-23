@@ -26,7 +26,7 @@ end
 -- prevents user chat state from being overwritten if it already exists
 if redis.call("EXISTS", stateKey) == 0 then
     redis.call("HSET", stateKey,
-    "lastReadSeq", seq,
+    "last_read_seq", seq,
     "pinned", "0",
     "muted", "0")
 

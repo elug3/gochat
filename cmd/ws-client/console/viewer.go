@@ -32,8 +32,10 @@ type Viewer struct {
 }
 
 func newViewer() *Viewer {
-	vp := viewport.New(30, 20)
+	vp := viewport.New(120, 20)
 	ta := textarea.New()
+	ta.SetHeight(1)
+	ta.ShowLineNumbers = false
 
 	v := Viewer{
 		vp: vp,
@@ -89,7 +91,7 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		v.vp.Width = msg.Width
-		v.vp.Height = msg.Height - 2
+		v.vp.Height = msg.Height
 
 	case tea.KeyMsg:
 		if v.focus {

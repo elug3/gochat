@@ -1,8 +1,9 @@
 local chatId   = KEYS[1]
-local name     = ARGV[1] or ""
-local ts       = ARGV[2] or "0"
+local name     = ARGV[1]
+local ts       = ARGV[2]
 
 assert(chatId ~= "", "chatId required")
+assert(name ~= "", "name required")
 
 local metaKey = "chats:" .. chatId .. ":meta"
 
@@ -15,8 +16,8 @@ local metaKey = "chats:" .. chatId .. ":meta"
 
 local added = redis.call("HSET", metaKey,
         "name", name,
-        "lastMessage", "",
-        "lastMessageAt", "0",
+        "last_message", "",
+        "last_message_at", "0",
         "type", "group",
         "seq", "0"
 )

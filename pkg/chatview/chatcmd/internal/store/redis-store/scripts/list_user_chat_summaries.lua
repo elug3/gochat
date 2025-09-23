@@ -29,8 +29,8 @@ for _, chatId in ipairs(chatIds) do
     
     local summary = {
         chatId = chatId,
-        lastMessageAt = metaMap["lastMessageAt"],
-        lastMessage = metaMap["lastMessage"],
+        lastMessageAt = metaMap["last_message_at"],
+        lastMessage = metaMap["last_message"],
         pinned = metaMap["pinned"] == "1",
         muted = metaMap["muted"] == "1",
     }

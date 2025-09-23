@@ -13,6 +13,9 @@ type Options struct {
 	// Path to RSA private key in PEM format
 	KeyPath   string
 	UseTmpKey bool
+
+	SaveDir  string
+	InMemory bool
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -30,6 +33,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 
 	fs.StringVar(&opts.KeyPath, "secret", "", "Path to RSA private key in PEM format")
 	fs.BoolVar(&opts.UseTmpKey, "tmpkey", false, "Use temporary key")
+
+	fs.StringVar(&opts.SaveDir, "save-dir", "./", "Directory to save the database (default: ./) ")
+	fs.BoolVar(&opts.InMemory, "in-memory", false, "Use in-memory database")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

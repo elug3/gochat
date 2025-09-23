@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elug3/gochat/shared/model"
 	"github.com/google/go-querystring/query"
@@ -73,6 +74,23 @@ func (c *GroupsClient) List(ctx context.Context, opts ...RequestOption) ([]model
 
 	groups := make([]model.Group, 0)
 	if err = cfg.Do(ctx, &groups); err != nil {
+		return nil, err
+	}
+
+	return groups, nil
+}
+
+func (c GroupsClient) ListByUser(ctxx context.Context, userId int32, opts ...RequestOption) ([]model.Group, error) {
+	opts = append(c.opts, opts...)
+
+	path := fmt.Sprintf("/user/%d/groups", userId)
+	cfg, err := NewRequestConfig("GET", path, nil, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	groups := make([]model.Group, 0)
+	if err = cfg.Do(ctxx, &groups); err != nil {
 		return nil, err
 	}
 

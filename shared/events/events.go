@@ -18,12 +18,15 @@ const (
 	SubjectMemberJoined = "contacts.member.joined"
 	SubjectMemberLeft   = "contacts.member.left"
 	SubjectMessageSent  = "message.sent"
+
+	SubjectWebsocketSent = "websocket.sent"
 )
 
 const (
-	SubjectUserAll     = "user.>"
-	SubjectContactsAll = "contacts.>"
-	SubjectMessageAll  = "message.>"
+	SubjectUserAll      = "user.>"
+	SubjectContactsAll  = "contacts.>"
+	SubjectMessageAll   = "message.>"
+	SubjectWebsocketAll = "websocket.>"
 )
 
 // UserRegistered is published by AuthService after credentials are created for a user.
@@ -62,6 +65,13 @@ type MessageSent struct {
 	TimeStamp int64
 }
 
+type WebsocketSent struct {
+	ChatId    int
+	SenderId  int32
+	Content   string
+	TimeStamp int64
+}
+
 func (e UserRegistered) Subject() string {
 	return SubjectUserRegistered
 }
@@ -86,6 +96,10 @@ func (e MessageSent) Subject() string {
 	return SubjectMessageSent
 }
 
+func (e WebsocketSent) Subject() string {
+	return SubjectWebsocketSent
+}
+
 type EventFactory func() Event
 
 var subjects = map[string]EventFactory{
@@ -95,6 +109,7 @@ var subjects = map[string]EventFactory{
 	SubjectMemberJoined:   func() Event { return &MemberJoined{} },
 	SubjectMemberLeft:     func() Event { return &MemberLeft{} },
 	SubjectMessageSent:    func() Event { return &MessageSent{} },
+	SubjectWebsocketSent:  func() Event { return &WebsocketSent{} },
 }
 
 func UnmarshalEvent(subject string, data []byte) (Event, error) {

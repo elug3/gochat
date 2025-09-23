@@ -5,31 +5,40 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"strings"
 
 	"github.com/coder/websocket"
+	"github.com/elug3/gochat/api/httpclient"
+	"github.com/rs/zerolog/log"
 )
 
 // UserIdKey is the context key for user Id
 type UserIdKey struct{}
 
 type WsServer struct {
-	addr string
-	mux  http.ServeMux
-	auth *JwkAuthenticator
-	hub  *Hub
+	addr     string
+	mux      http.ServeMux
+	auth     *HttpAuthenticator
+	Contacts *httpclient.ContactsClient
+	hub      *Hub
 }
 
 func NewWsServer(hub *Hub, opts *Options) (*WsServer, error) {
 	addr := net.JoinHostPort(opts.Host, opts.Port)
-	auth, err := NewAuthenticator(opts.AuthUrl)
+
+	auth, err := NewHttpAuthenticator(opts.AuthServerUrl)
 	if err != nil {
 		return nil, err
 	}
+
+	contactsClient := httpclient.NewContactsClient(
+		httpclient.WithBaseUrl(opts.ContactsServerUrl),
+	)
+
 	s := WsServer{
-		addr: addr,
-		auth: auth,
-		hub:  hub,
+		addr:     addr,
+		auth:     auth,
+		hub:      hub,
+		Contacts: contactsClient,
 	}
 
 	s.mux.HandleFunc("/ws", s.AuthMiddleware(s.ServeWs))
@@ -39,21 +48,18 @@ func NewWsServer(hub *Hub, opts *Options) (*WsServer, error) {
 
 func (s *WsServer) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, err := parseToken(r)
+		wsToken, err := parseTokenQuery(r)
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
-		userId, err := s.auth.Authenticate(r.Context(), token)
-		if err != nil || userId == 0 {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		userId, err := s.auth.ValidateWsToken(r.Context(), wsToken)
+		if err != nil {
+			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
-		// You can set the user ID in the request context if needed
 		ctx := context.WithValue(r.Context(), UserIdKey{}, userId)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -72,34 +78,38 @@ func (s *WsServer) ServeWs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, nil)
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{"*"},
+	})
 	if err != nil {
-		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+		log.Error().Err(err).Msg("failed to accept websocket connection")
 		return
 	}
 
-	client := NewClient(userId, conn)
-	s.hub.Register(client)
-}
-
-// parseToken extracts the token from the Authorization header
-func parseToken(r *http.Request) (string, error) {
-	auth := r.Header.Get("Authorization")
-	s := strings.SplitN(auth, " ", 2)
-	if len(s) != 2 || s[0] != "Bearer" {
-		return "", fmt.Errorf("invalid token")
+	s.hub.registerCh <- &RegisterMsg{UserId: userId, Conn: conn}
+	groups, err := s.Contacts.Groups.ListByUser(r.Context(), userId)
+	if err != nil {
+		log.Error().Err(err).Msgf("failed to get groups for user %d", userId)
 	}
-	return s[1], nil
+	for _, group := range groups {
+		s.hub.subscribeCh <- &SubscribeMsg{ChatId: group.Id, UserId: userId}
+	}
 }
 
-// getUserIdFromContext extracts the user ID from the context
 func getUserIdFromContext(ctx context.Context) int32 {
 	if ctx == nil {
 		return 0
 	}
-	userId, ok := ctx.Value(UserIdKey{}).(int32)
-	if !ok {
-		return 0
+	if userId, ok := ctx.Value(UserIdKey{}).(int32); ok {
+		return userId
 	}
-	return userId
+	return 0
+}
+
+func parseTokenQuery(r *http.Request) (string, error) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		return "", fmt.Errorf("missing token in query")
+	}
+	return token, nil
 }

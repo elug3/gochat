@@ -15,6 +15,8 @@ import (
 	"github.com/alexedwards/argon2id"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
+	"github.com/patrickmn/go-cache"
+
 	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/elug3/gochat/pkg/auth/internal/store"
 	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
@@ -23,9 +25,10 @@ import (
 )
 
 type AuthService struct {
-	store  store.AuthStore
-	jwtKey *rsa.PrivateKey
-	jwks   *jwk.Jwks
+	store    store.AuthStore
+	jwtKey   *rsa.PrivateKey
+	jwks     *jwk.Jwks
+	wsTokens *cache.Cache
 }
 
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
@@ -68,14 +71,15 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 	}
 
 	// Initialize store
-	store, err := sqlite3.NewAuthStore()
+	store, err := sqlite3.NewAuthStore(opts.SaveDir, opts.InMemory)
 	if err != nil {
 		return nil, err
 	}
 	return &AuthService{
-		store:  store,
-		jwtKey: jwtKey,
-		jwks:   jwks,
+		store:    store,
+		jwtKey:   jwtKey,
+		jwks:     jwks,
+		wsTokens: cache.New(5*time.Minute, 10*time.Minute),
 	}, nil
 }
 
@@ -92,7 +96,7 @@ func credentialsRule(username, password string) error {
 func (s *AuthService) RegisterUser(ctx context.Context, username, password string) (int32, error) {
 	err := credentialsRule(username, password)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %w", errs.ErrConstraint, err)
 	}
 	passwordHash, err := newHash(password)
 	if err != nil {
@@ -150,13 +154,63 @@ func Refresh(ctx context.Context, refreshToken string) (newAccessToken, newRefre
 	return "", "", nil
 }
 
-func ValidateAccessToken(ctx context.Context, accessToken string) (userID int64, err error) {
-
-	return 0, nil
+// ValidateAccessToken validates the access token and returns the user Id if valid.
+func (s *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (userId int32, err error) {
+	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.jwtKey.Public(), nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if !token.Valid {
+		return 0, errs.ErrAuthenticationFailure
+	}
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		if sub, ok := claims["sub"].(string); ok {
+			var uid int32
+			if _, err = fmt.Sscan(sub, &uid); err != nil {
+				return 0, fmt.Errorf("invalid sub claim: %w", err)
+			}
+			return uid, nil
+		}
+		return 0, fmt.Errorf("sub claim not found")
+	}
+	return 0, fmt.Errorf("invalid token claims")
 }
 
 func (s *AuthService) RevokeAccessToken(ctx context.Context) error {
 	return nil
+}
+
+func (s *AuthService) CreateWsToken(ctx context.Context, accessToken string) (string, error) {
+	userId, err := s.ValidateAccessToken(ctx, accessToken)
+	if err != nil {
+		return "", err
+	}
+	return s.createWsToken(ctx, userId)
+}
+
+func (s *AuthService) createWsToken(ctx context.Context, userId int32) (string, error) {
+	token := rand.Text()
+	s.wsTokens.Set(token, userId, time.Second*300) // 5 minutes
+
+	return token, nil
+}
+
+func (s *AuthService) UseWsToken(ctx context.Context, token string) (userId int32, err error) {
+	u, found := s.wsTokens.Get(token)
+	if !found {
+		return 0, errs.ErrAuthenticationFailure
+	}
+	userId, ok := u.(int32)
+	if !ok {
+		return 0, fmt.Errorf("invalid user id type in ws token cache")
+	}
+	s.wsTokens.Delete(token)
+	return userId, nil
 }
 
 func (s *AuthService) GetJwksData() ([]byte, error) {

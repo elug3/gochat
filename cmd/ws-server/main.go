@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/elug3/gochat/pkg/ws"
+	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,7 +21,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	hub := ws.NewHub()
+	eventPub, err := events.NewPublisher(opts.NatsUrl)
+	if err != nil {
+		fmt.Printf("Error creating event publisher: %v\n", err)
+		os.Exit(1)
+	}
+
+	hub := ws.NewHub(eventPub)
+
+	el, err := ws.NewEventListener(hub, opts)
+	if err != nil {
+		fmt.Printf("Error creating event listener: %v\n", err)
+		os.Exit(1)
+	}
+
 	srv, err := ws.NewWsServer(hub, opts)
 	if err != nil {
 		fmt.Printf("Error creating WebSocket server: %v\n", err)
@@ -29,6 +43,10 @@ func main() {
 
 	go func() {
 		hub.Run(ctx)
+	}()
+
+	go func() {
+		el.Run(ctx)
 	}()
 
 	log.Info().Msgf("Starting WebSocket server on %s", opts.Port)

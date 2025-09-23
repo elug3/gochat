@@ -37,8 +37,6 @@ services:
     depends_on:
       - nats-server
       - chatview-db
-
-
   messages:
     build: ./cmd/gochat-message_server
     container_name: gochat-message_server
@@ -47,6 +45,17 @@ services:
       - NATS_URL=nats://nats-server:4222
     depends_on:
       - nats-server
+  ws:
+    build: ./cmd/ws-server
+    container_name: ws-server
+    environment:
+      - AUTH_SERVER=auth:8080
+      - CONTACTS_SERVER=contacts:8080
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+      - auth
+      - contacts
 
   krakend:
     image: krakend:2.10
@@ -56,6 +65,7 @@ services:
     ports:
       - "8080:8080"
     command: ["run", "-c", "/etc/krakend/krakend.json", "-d"]
+
 
   chatview-db:
     image: redis:8.2

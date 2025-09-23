@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ func printUsage() {
 }
 
 func main() {
+	ctx := context.Background()
 	fs := flag.NewFlagSet("gochat-message_server", flag.ExitOnError)
 	fs.Usage = printUsage
 	opts, err := message.ConfigureOptions(fs, os.Args[1:])
@@ -37,6 +39,18 @@ func main() {
 		fmt.Printf("Error creating server: %v\n", err)
 		os.Exit(1)
 	}
+	eventSrv, err := message.NewEventServer(opts)
+	if err != nil {
+		fmt.Printf("Error creating event server: %v\n", err)
+	}
+
+	go func() {
+		fmt.Printf("event listener started\n")
+		if err := eventSrv.Run(ctx); err != nil {
+			fmt.Printf("event server: %v\n", err)
+		}
+	}()
+
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)

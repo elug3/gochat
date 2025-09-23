@@ -2,6 +2,7 @@ package events
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -38,7 +39,7 @@ func (s *Subscriber) SubscribeStream(stream, durable string, handler HandlerFn) 
 		}
 		if err := handler(event); err != nil {
 			fmt.Printf("handler error: %v\n", err)
-			msg.Nak()
+			msg.Nak(nats.AckWait(time.Second * 3))
 			return
 		}
 		if err := msg.Ack(); err != nil {

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
-	"flag"
+	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/coder/websocket"
 	"github.com/elug3/gochat/api/httpclient"
 	"github.com/elug3/gochat/cmd/ws-client/console"
 )
@@ -19,7 +21,7 @@ Options:
 	-h, --help          Show this help message and exit
 	-t, --token TOKEN   API token (or set the GOCHAT_API_TOKEN environment variable)
 	-u, --url URL       Base URL of the API (default: http://localhost:8080)
-	--ws, URL 	  WebSocket URL of the API (default: ws://localhost:8080/ws)
+	-ws-url, URL       WebSocket URL of the API (default: ws://localhost:8080/ws)
 `
 
 func printUsage() {
@@ -28,32 +30,55 @@ func printUsage() {
 
 var api *httpclient.Api
 
+type Message struct {
+	ChatId  int    `json:"chat_id"`
+	Content string `json:"content"`
+}
+
+var wsUrl = os.Getenv("GOCHAT_WS_URL")
+
 func main() {
-	fs := flag.NewFlagSet("ws-client", flag.ExitOnError)
-	fs.Usage = printUsage
-
-	opts, err := httpclient.ConfigureOptions(fs, os.Args[1:])
-	if err != nil {
-		fmt.Printf("Error parsing options: %v\n", err)
-		return
-	}
-
-	api = httpclient.NewApi(opts...)
-
 	ctx := context.Background()
-	if ok, err := api.IsAuthenticated(ctx); !ok {
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("Not authenticated. Please check your api token.")
+
+	conn, resp, err := websocket.Dial(ctx, wsUrl, &websocket.DialOptions{})
+	if err != nil {
+		fmt.Printf("Failed to connect to WebSocket: %v\n", err)
 		return
 	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("cannot read body: %v\n", err)
+	}
+	if resp.StatusCode != 101 {
+		fmt.Printf("Unexpected status code: %d: %s\n", resp.StatusCode, body)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "bye")
 
-	list, _ := console.NewList(nil, loadGroupList)
+	go func() {
+		for {
+			msg := Message{ChatId: 1, Content: "Hello, WebSocket!"}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				fmt.Printf("Error marshaling message: %v\n", err)
+				return
+			}
+			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+				fmt.Printf("Error writing message: %v\n", err)
+				return
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
 
-	console.Clear()
-	if _, err := tea.NewProgram(list).Run(); err != nil {
-		fmt.Println("Error running program:", err)
+	for {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			fmt.Printf("Error reading message: %v\n", err)
+			return
+		}
+		fmt.Printf("Received: %s\n", msg)
 	}
 }
 
