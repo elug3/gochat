@@ -48,6 +48,11 @@ func NewHub(eventPub *events.Publisher) *Hub {
 	}
 }
 
+type OutMsg struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 type User struct {
 	Id          int32
 	Clients     map[int]*Client
@@ -77,10 +82,10 @@ type SubscribeMsg struct {
 }
 
 type BroadcastMsg struct {
-	ChatId    int
-	SenderId  int32
-	TimeStamp int64
-	Data      []byte
+	ChatId    int    `json:"chat_id,omitempty"`
+	SenderId  int32  `json:"sender_id,omitempty"`
+	TimeStamp int64  `json:"time_stamp,omitempty"`
+	Content   string `json:"content,omitempty"`
 }
 
 // Register is shorthand for adding a client to the hub's register channel.
@@ -173,11 +178,20 @@ func (h *Hub) Run(ctx context.Context) error {
 					// broadcast to all users in the chat
 					for _, user := range chat.Users {
 						for _, client := range user.Clients {
-							data, err := json.Marshal(msg)
+							var outMsg OutMsg
+							outMsg.Type = "message"
+							msgData, err := json.Marshal(msg)
 							if err != nil {
-								log.Warn().Err(err).Msgf("failed to marshal client message for chat %d", msg.ChatId)
+								log.Warn().Err(err).Msgf("failed to marshal broadcast message for chat %d", msg.ChatId)
 								continue
 							}
+							outMsg.Payload = msgData
+							data, err := json.Marshal(outMsg)
+							if err != nil {
+								log.Warn().Err(err).Msgf("failed to marshal broadcast message for chat %d", msg.ChatId)
+								continue
+							}
+
 							if err := client.conn.Write(ctx, websocket.MessageText, data); err != nil {
 								log.Warn().Err(err).Msgf("failed to write message to user %d client %d", user.Id, client.Id)
 								continue
@@ -202,11 +216,23 @@ func (h *Hub) Run(ctx context.Context) error {
 			if chat, ok := h.chats[msg.ChatId]; ok {
 				for _, user := range chat.Users {
 					for _, client := range user.Clients {
-						data, err := json.Marshal(msg)
+
+						msgData, err := json.Marshal(msg)
 						if err != nil {
 							log.Warn().Err(err).Msgf("failed to marshal broadcast message for chat %d", msg.ChatId)
 							continue
 						}
+
+						var outMsg OutMsg
+						outMsg.Type = "message"
+						outMsg.Payload = msgData
+
+						data, err := json.Marshal(outMsg)
+						if err != nil {
+							log.Warn().Err(err).Msgf("failed to marshal broadcast message for chat %d", msg.ChatId)
+							continue
+						}
+
 						if err := client.conn.Write(ctx, websocket.MessageText, data); err != nil {
 							log.Warn().Err(err).Msgf("failed to write message to user %d client %d", user.Id, client.Id)
 							continue
@@ -222,19 +248,6 @@ func (h *Hub) Run(ctx context.Context) error {
 func newChat() *Chat {
 	return &Chat{
 		Users: make(map[int32]*User),
-	}
-}
-
-func (u *User) Run(ctx context.Context) error {
-	for {
-		select {
-		case msg := <-u.BroadcastCh:
-			for _, client := range u.Clients {
-			}
-
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
 }
 

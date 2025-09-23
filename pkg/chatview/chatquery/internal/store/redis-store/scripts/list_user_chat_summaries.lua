@@ -15,18 +15,18 @@ local summaries = {}
 
 for _, chatId in ipairs(chatIds) do
     local metaKey = "chats:" .. chatId .. ":meta"
-    local stateKey = "users:" .. userId .. ":chats:" .. chatId .. ":state"
+    local stateKey = "users:" .. userId .. ":chat:" .. chatId .. ":state"
     
     local meta = redis.call("HGETALL", metaKey)
     local state = redis.call("HGETALL", stateKey)
 
     local summaryMap = {}
     for i = 1, #meta, 2 do summaryMap[meta[i]] = meta[i + 1] end
-    for i = 1, #state, 2 do stateMap[state[i]] = state[i + 1] end
+    for i = 1, #state, 2 do summaryMap[state[i]] = state[i + 1] end
 
-    local seq = tonumber(summaryMap["seq"] or "0")
-    local lastReadSeq = tonumber(summaryMap["last_read_seq"] or "0")
-    local unreadCount = math.max(0, seq - lastReadSeq)
+    local seq = tonumber(summaryMap["seq"])
+    local lastReadSeq = tonumber(summaryMap["last_read_seq"])
+    local unreadCount = seq - lastReadSeq
     
     local summary = {
         id = tonumber(chatId),

@@ -46,8 +46,11 @@ func (s *ChatProjectionServer) Run(ctx context.Context) error {
 			err = s.handler.OnMemberLeft(ctx, ev)
 		case *events.MessageSent:
 			err = s.handler.OnMessageSent(ctx, ev)
+		case *events.MessaageRead:
+			err = s.handler.OnMessageRead(ctx, ev)
 		default:
 			log.Warn().Msgf("unknown event type: %T", event)
+			return nil
 		}
 		if err != nil {
 			log.Error().Err(err).Msgf("failed to handle event: %T", event)

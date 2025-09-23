@@ -9,9 +9,9 @@ type Chat = {
 
 
 type Message = {
-    Id: number;
-    ChatId: number;
-    Sender: number;
-    Content: string;
-    SentAt: string;
+    id: number;
+    chatId: number;
+    sender: number;
+    content: string;
+    sentAt: number;
 }

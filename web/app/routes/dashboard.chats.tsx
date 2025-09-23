@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { Link, NavLink, Outlet, useLoaderData, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
 import { ChatProvider, useChat } from "~/context/chat";
 import { fetchChatList, getWsToken } from "~/utils/auth.server";
 
@@ -15,8 +15,13 @@ export async function loader({request}: LoaderFunctionArgs): Promise<ChatData> {
   const wsToken = await getWsToken(request);
 
   return { chats, wsToken };
-
 }
+
+export function shouldRevalidate({ formAction }: ShouldRevalidateFunctionArgs) {
+  return false;
+}
+
+
 
 export function Sidebar() {
   const {chats, wsState} = useChat();

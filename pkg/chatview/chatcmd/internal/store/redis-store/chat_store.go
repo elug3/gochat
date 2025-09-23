@@ -3,6 +3,7 @@ package redisstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -56,9 +57,9 @@ func (store *ChatStore) CreateGroupChat(ctx context.Context, chatId int, groupNa
 	return nil
 }
 
-func (store *ChatStore) AddChatToUser(ctx context.Context, userId int, chatId int, timestamp int64) error {
+func (store *ChatStore) AddChatToUser(ctx context.Context, userId int32, chatId int, timestamp int64) error {
 	keys := []string{
-		strconv.Itoa(userId),
+		strconv.FormatInt(int64(userId), 10),
 		strconv.Itoa(chatId),
 	}
 	s, err := addChatToUserScript.Run(ctx, store.rdb, keys).Text()
@@ -100,5 +101,30 @@ func (store *ChatStore) UpdateLastMessage(ctx context.Context, chatId int, messa
 	if res.Err != "" {
 		return fmt.Errorf("failed to update last message: %s", res.Err)
 	}
+	return nil
+}
+
+func (store *ChatStore) UpdateLastReadSeq(ctx context.Context, chatId int, userId int32) error {
+	keys := []string{
+		strconv.FormatInt(int64(userId), 10), // local userId = KEYS[1]
+		strconv.Itoa(chatId),                 // local chatId = KEYS[2]
+	}
+	fmt.Println("userId:", strconv.FormatInt(int64(userId), 10))
+
+	result, err := updateLastReadSeqScript.Run(ctx, store.rdb, keys).Text()
+	if err != nil {
+		return fmt.Errorf("script error: %w", err)
+	}
+
+	var res struct {
+		Err string `json:"err"`
+	}
+	if err = json.Unmarshal([]byte(result), &res); err != nil {
+		return err
+	}
+	if res.Err != "" {
+		return errors.New(res.Err)
+	}
+
 	return nil
 }

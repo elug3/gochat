@@ -4,6 +4,7 @@ import type { ChatData } from "~/routes/dashboard.chats";
 type ChatContextType = {
     chats: Record<string, Chat>;
     chatsMessages: Record<string, Message[]>;
+    setChatsMessages?: Dispatch<SetStateAction<Record<string, Message[]>>>;
     wsState: WsState;
 }
 
@@ -21,6 +22,32 @@ export function ChatProvider({children, initialChatData}: {children: ReactNode, 
     const [wsState, setWsState] = useState<WsState>("idle");
     const [chats, setChats] = useState<Record<string, Chat>>(initialChats);
     const [chatsMessages, setChatsMessages] = useState<Record<string, Message[]>>({});
+
+    const onMessage = (message: Message) => {
+        setChatsMessages((prev) => {
+            if (!prev[message.chatId]) {
+                prev[message.chatId] = [];
+            }
+            prev[message.chatId].push(message);
+            console.log("Updated messages:", prev);
+            return {...prev, [message.chatId]: [...prev[message.chatId]]};
+        });
+
+        setChats((prev) => {
+            const chat = prev[message.chatId];
+            if (!chat) return prev;
+
+            return {
+                ...prev,
+                [chat.id]: {
+                    ...chat,
+                    lastMessage: message.content,
+                    lastMessageAt: message.sentAt,
+                    unreadCount: chat.unreadCount + 1,
+                }
+            }
+        });
+    }
 
     useEffect(() => {
         if (wsRef.current) return; // already connected
@@ -40,6 +67,14 @@ export function ChatProvider({children, initialChatData}: {children: ReactNode, 
 
         ws.onmessage = (event) => {
             console.log("WebSocket message received:", event.data);
+            const data = JSON.parse(toCamelCase(event.data));
+            console.log("Parsed data:", data);
+            switch (data.type) {
+                case "message":
+                    onMessage(data.payload);
+                    break;
+                    
+            }
         };
 
         return () => {
@@ -51,6 +86,7 @@ export function ChatProvider({children, initialChatData}: {children: ReactNode, 
         <ChatContext.Provider value={{
             chats,
             chatsMessages,
+            setChatsMessages,
             wsState,
         }}>
             {children}
@@ -64,4 +100,8 @@ export function useChat() {
         throw new Error("useChat must be used within a ChatProvider");
     }
     return context;
+}
+
+function toCamelCase(str: string): string {
+    return str.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
 }

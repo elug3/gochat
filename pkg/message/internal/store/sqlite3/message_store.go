@@ -44,7 +44,7 @@ func GetTx(ctx context.Context) (*sql.Tx, error) {
 	return tx, nil
 }
 
-func (s *MessageStore) CreateMessage(ctx context.Context, chatId, userId int, content string) (*model.Message, error) {
+func (s *MessageStore) CreateMessage(ctx context.Context, chatId int, userId int32, content string) (*model.Message, error) {
 	tx, err := GetTx(ctx)
 	if err != nil {
 		return nil, err

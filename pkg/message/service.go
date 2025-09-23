@@ -40,7 +40,7 @@ func NewMessageService(opts *Options) (*MessageService, error) {
 	return &s, nil
 }
 
-func (s *MessageService) Send(ctx context.Context, userId, chatId int, content string) (*model.Message, error) {
+func (s *MessageService) Send(ctx context.Context, userId int32, chatId int, content string) (*model.Message, error) {
 	var msg *model.Message
 	var err error
 
@@ -54,7 +54,7 @@ func (s *MessageService) Send(ctx context.Context, userId, chatId int, content s
 			return nil, fmt.Errorf("cannot send to group '%d': %w", chatId, err)
 		}
 	} else if chatId < 0 {
-		msg, err = s.sendToUser(ctx, userId, chatId, content)
+		msg, err = s.sendToUser(ctx, chatId, userId, content)
 		if err != nil {
 			return nil, fmt.Errorf("cannot send to user '%d': %w", userId, err)
 		}
@@ -87,7 +87,7 @@ func (s *MessageService) ListMessages(ctx context.Context, chatId int) ([]model.
 }
 
 // ListUserChatMessages gets messages for a chat with permission checks
-func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId, userId int) ([]model.Message, error) {
+func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId int, userId int32) ([]model.Message, error) {
 	ctx, cancel := s.store.WithContext(ctx)
 	defer cancel()
 
@@ -110,10 +110,17 @@ func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId, userI
 	if err != nil {
 		return nil, fmt.Errorf("cannot list messages: %w", err)
 	}
+
+	s.pub.Publish(events.MessaageRead{
+		ChatId:    chatId,
+		UserId:    userId,
+		TimeStamp: 0, // TODO: set timestamp
+	})
+
 	return messages, nil
 }
 
-func (s *MessageService) sendToGroup(ctx context.Context, userId, chatId int, content string) (*model.Message, error) {
+func (s *MessageService) sendToGroup(ctx context.Context, userId int32, chatId int, content string) (*model.Message, error) {
 	ctx, cancel := s.store.WithContext(ctx)
 	defer cancel()
 
@@ -138,7 +145,7 @@ func (s *MessageService) sendToGroup(ctx context.Context, userId, chatId int, co
 }
 
 // TODO: Implement sending to user
-func (s *MessageService) sendToUser(ctx context.Context, chatId, userId int, content string) (*model.Message, error) {
+func (s *MessageService) sendToUser(ctx context.Context, chatId int, userId int32, content string) (*model.Message, error) {
 	return nil, nil
 
 }

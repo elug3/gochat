@@ -24,8 +24,7 @@ func NewMessageHandler(messages *MessageService) *MessageHandler {
 }
 
 func (h *MessageHandler) HandleListMessages(c *gin.Context) {
-	chatIdStr := c.Param("chat_id")
-	chatId, err := strconv.Atoi(chatIdStr)
+	chatId, err := parseChatId(c)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid chat_id"})
 		return
@@ -41,8 +40,7 @@ func (h *MessageHandler) HandleListMessages(c *gin.Context) {
 }
 
 func (h *MessageHandler) HandleUserSendMessage(c *gin.Context) {
-	userIdStr := c.Param("user_id")
-	userId, err := strconv.Atoi(userIdStr)
+	userId, err := parseUserId(c)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
 		return
@@ -65,15 +63,12 @@ func (h *MessageHandler) HandleUserSendMessage(c *gin.Context) {
 }
 
 func (h *MessageHandler) HandleUserListMessage(c *gin.Context) {
-	userIdStr := c.Param("user_id")
-	userId, err := strconv.Atoi(userIdStr)
+	userId, err := parseUserId(c)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
 		return
 	}
-
-	chatIdStr := c.Param("chat_id")
-	chatId, err := strconv.Atoi(chatIdStr)
+	chatId, err := parseChatId(c)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid chat_id"})
 		return
@@ -96,4 +91,22 @@ func RegisterRoutes(router *gin.Engine, h *MessageHandler) {
 
 func (h *MessageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.router.ServeHTTP(w, r)
+}
+
+func parseChatId(c *gin.Context) (int, error) {
+	chatIdStr := c.Param("chat_id")
+	chatId, err := strconv.Atoi(chatIdStr)
+	if err != nil {
+		return 0, err
+	}
+	return chatId, nil
+}
+
+func parseUserId(c *gin.Context) (int32, error) {
+	userIdStr := c.Param("user_id")
+	userIdInt, err := strconv.Atoi(userIdStr)
+	if err != nil {
+		return 0, err
+	}
+	return int32(userIdInt), nil
 }

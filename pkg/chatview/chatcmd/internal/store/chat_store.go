@@ -9,5 +9,7 @@ type ChatStore interface {
 	// UpdateLastMessage updates last message of the chat and increments the chat sequence.
 	UpdateLastMessage(ctx context.Context, chatId int, message string, timestamp int64) error
 	// AddChatToUser adds chat to user's chat list.
-	AddChatToUser(ctx context.Context, userId int, chatId int, timestamp int64) error
+	AddChatToUser(ctx context.Context, userId int32, chatId int, timestamp int64) error
+
+	UpdateLastReadSeq(ctx context.Context, userId int32, chatId int) error
 }

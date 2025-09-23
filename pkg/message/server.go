@@ -50,7 +50,7 @@ func (srv *EventServer) Run(ctx context.Context) error {
 	srv.EventSub.SubscribeStream("WEBSOCKET", "messages", func(event events.Event) error {
 		switch ev := event.(type) {
 		case *events.WebsocketSent:
-			_, err := srv.Messages.Send(ctx, int(ev.SenderId), ev.ChatId, ev.Content)
+			_, err := srv.Messages.Send(ctx, ev.SenderId, ev.ChatId, ev.Content)
 			if err != nil {
 				return err
 			}

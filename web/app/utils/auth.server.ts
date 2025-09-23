@@ -1,4 +1,5 @@
 import { getSession } from "~/session.server";
+import { camelToSnake, keysToCamel } from "./case";
 
 export async function getAccessToken(request: Request) {
     const session = await getSession(request.headers.get("Cookie"));
@@ -57,7 +58,7 @@ export async function getChats(request: Request) {
     return res.json();
 }
 
-export async function getChatMessages(request: Request, chatId: string) {
+export async function getChatMessages(request: Request, chatId: string): Promise<Message[]> {
     const session = await getSession(request.headers.get("Cookie"))
     const token = session.get("accessToken") as string | undefined;
     
@@ -71,8 +72,10 @@ export async function getChatMessages(request: Request, chatId: string) {
 
     if (!res.ok) throw new Error("Failed to fetch messages " + res.statusText);
 
-    const data = await res.json();
-    return data;
+    const jsonData = await res.json();
+    const data = await keysToCamel(jsonData);
+
+    return data as Message[];
 }
 
 
@@ -85,7 +88,7 @@ export async function sendMessage(request: Request, sendParams: {chatId: number,
             "Content-Type": "application/json",
             "Authorization": "Bearer " + accessToken,
         },
-        body: toSnakeCase(JSON.stringify(sendParams)),
+        body: camelToSnake(JSON.stringify(sendParams)),
     });
 
     if (!res.ok) {
@@ -95,11 +98,10 @@ export async function sendMessage(request: Request, sendParams: {chatId: number,
     return res.json();
 }
 
-function toSnakeCase(str: string): string {
-    return str
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2") 
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2") 
-    .toLowerCase();
+
+
+function toCamelCase(str: string): string {
+    return str.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
 }
 
 export async function getWsToken(request: Request): Promise<string> {

@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import { useFetcher, useLoaderData, useParams, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData, useParams, type ActionFunctionArgs, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
+import { useChat } from "~/context/chat";
 import { getChatMessages, sendMessage } from "~/utils/auth.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages: Message[] }> {
   const chatId = params.chatId;
   const messages = await getChatMessages(request, chatId!);
   return { messages };
@@ -18,10 +19,13 @@ export async function action({request, params}: ActionFunctionArgs) {
     content: content,
   });
 
-  console.log("Message sent:", result);
-
-  return JSON.stringify({ ok: true });
+  return {ok: true};
 }
+
+export function shouldRevalidate({ formAction }: ShouldRevalidateFunctionArgs) {
+  return false;
+}
+
 
 function InputComponent() {
   const fetcher = useFetcher();
@@ -55,8 +59,24 @@ function InputComponent() {
 }
 
 export default function ChatDetail() {
-  const  messages = undefined 
+  const { chatId } = useParams();
+  if (!chatId) {
+    return <div>No chat selected.</div>;
+  }
+
+  const { chatsMessages, setChatsMessages} = useChat();
+  if (!setChatsMessages) {
+    return <div>Loading...</div>;
+  }
   
+  const data = useLoaderData<typeof loader>();
+  if (chatsMessages[chatId] === undefined) {
+    setChatsMessages(prev => ({...prev, [chatId]: data.messages}));
+  }
+
+  const messages = chatsMessages[chatId];
+
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -76,10 +96,10 @@ export default function ChatDetail() {
           <div>No messages yet.</div>
         ) : (
           messages.map((msg) => (
-            <div key={msg.Id} className="p-2 bg-gray-100 rounded">
-              <div className="text-sm text-gray-600">{msg.ChatId}</div>
-              <div>{msg.Content}</div>
-              <div className="text-xs text-gray-500">{msg.SentAt}</div>
+            <div key={msg.id} className="p-2 bg-gray-100 rounded">
+              <div className="text-sm text-gray-600">{msg.chatId}</div>
+              <div>{msg.content}</div>
+              <div className="text-xs text-gray-500">{msg.sentAt}</div>
             </div>
           ))
         )}

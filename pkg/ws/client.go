@@ -63,7 +63,7 @@ func (c *Client) WriteChan(ctx context.Context, ch chan *BroadcastMsg) {
 			if !ok {
 				return
 			}
-			if err := c.conn.Write(ctx, websocket.MessageText, msg.Data); err != nil {
+			if err := c.conn.Write(ctx, websocket.MessageText, []byte(msg.Content)); err != nil {
 				log.Error().Err(err).Msg("failed to write message to client")
 				return
 			}

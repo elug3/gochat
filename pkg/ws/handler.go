@@ -18,7 +18,7 @@ func (h *EventHandler) OnMessageSent(ev *events.MessageSent) error {
 		ChatId:    ev.ChatId,
 		SenderId:  int32(ev.SenderId), // TODO: update event.senderId to int32
 		TimeStamp: ev.TimeStamp,
-		Data:      []byte(ev.Content),
+		Content:   ev.Content,
 	}
 	return nil
 }

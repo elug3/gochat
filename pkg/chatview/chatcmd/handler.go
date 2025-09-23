@@ -39,3 +39,7 @@ func (s *ChatCommandHandler) OnMemberLeft(ctx context.Context, ev *events.Member
 func (s *ChatCommandHandler) OnMessageSent(ctx context.Context, ev *events.MessageSent) error {
 	return s.store.UpdateLastMessage(ctx, ev.ChatId, ev.Content, ev.TimeStamp)
 }
+
+func (s *ChatCommandHandler) OnMessageRead(ctx context.Context, ev *events.MessaageRead) error {
+	return s.store.UpdateLastReadSeq(ctx, ev.ChatId, ev.UserId)
+}

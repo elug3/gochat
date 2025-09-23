@@ -34,12 +34,15 @@ func (s *Subscriber) SubscribeStream(stream, durable string, handler HandlerFn) 
 		event, err := UnmarshalEvent(msg.Subject, msg.Data)
 		if err != nil {
 			fmt.Printf("failed to unmarshal event: %v\n", err)
-			msg.Nak()
+			// TODO: add unhandled message queue
+			if err = msg.Ack(); err != nil {
+				fmt.Printf("failed to ack message: %v\n", err)
+			}
 			return
 		}
 		if err := handler(event); err != nil {
 			fmt.Printf("handler error: %v\n", err)
-			msg.Nak(nats.AckWait(time.Second * 3))
+			msg.NakWithDelay(time.Second * 3)
 			return
 		}
 		if err := msg.Ack(); err != nil {

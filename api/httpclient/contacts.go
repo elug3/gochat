@@ -21,9 +21,9 @@ func NewContactsClient(opts ...RequestOption) *ContactsClient {
 }
 
 type AccessRequestParams struct {
-	UserId   int    `url:"user_id"`
+	UserId   int32  `url:"user_id"`
 	ChatId   int    `url:"chat_id"`
-	TargetId int    `url:"target_id"`
+	TargetId int32  `url:"target_id"`
 	Action   string `url:"action"`
 }
 

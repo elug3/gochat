@@ -13,7 +13,7 @@ type MessageOptions struct {
 
 type MessageStore interface {
 	WithContext(ctx context.Context) (context.Context, context.CancelFunc)
-	CreateMessage(ctx context.Context, chatId, userId int, content string) (*model.Message, error)
+	CreateMessage(ctx context.Context, chatId int, userId int32, content string) (*model.Message, error)
 	ListMessages(ctx context.Context, chatId int, options *MessageOptions) ([]model.Message, error)
 	DeleteMessage(ctx context.Context, messageId int) error
 }
