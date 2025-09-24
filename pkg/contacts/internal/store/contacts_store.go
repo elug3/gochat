@@ -19,18 +19,18 @@ type TxContacts interface {
 	CreateGroup(name string) (*model.Group, error)
 	DeleteGroup(id int) error
 
-	ListUserGroups(userId int) ([]model.Group, error)
+	ListUserGroups(userId int32) ([]model.Group, error)
 	ListGroupMembers(groupId int) ([]model.Member, error)
 
-	GetMember(groupId, userId int) (*model.Member, error)
-	CreateMember(groupId, userId int, role access.Role) (*model.Member, error)
-	DeleteMember(groupId, userId int) error
-	MemberExists(groupId, userId int) (bool, error)
+	GetMember(groupId int, userId int32) (*model.Member, error)
+	CreateMember(groupId int, userId int32, role access.Role) (*model.Member, error)
+	DeleteMember(groupId int, userId int32) error
+	MemberExists(groupId int, userId int32) (bool, error)
 
 	ListProfiles(limit int) ([]model.Profile, error)
-	CreateProfile(userId int, name string) (*model.Profile, error)
-	DeleteProfile(userId int) error
+	CreateProfile(userId int32, name string) (*model.Profile, error)
+	DeleteProfile(userId int32) error
 
 	// FindOwners returns a list of members with RoleOwner for the given user
-	FindOwners(userId int) ([]model.Member, error)
+	FindOwners(userId int32) ([]model.Member, error)
 }

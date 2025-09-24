@@ -62,7 +62,7 @@ func (s *ContactsService) ListGroups() ([]model.Group, error) {
 	return gs, nil
 }
 
-func (s *ContactsService) CreateUserGroup(userId int, groupName string) (*model.Group, error) {
+func (s *ContactsService) CreateUserGroup(userId int32, groupName string) (*model.Group, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (s *ContactsService) CreateUserGroup(userId int, groupName string) (*model.
 	return g, nil
 }
 
-func (s *ContactsService) ListUserGroups(userId int) ([]model.Group, error) {
+func (s *ContactsService) ListUserGroups(userId int32) ([]model.Group, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (s *ContactsService) ListUserGroups(userId int) ([]model.Group, error) {
 	return groups, nil
 }
 
-func (s *ContactsService) GetUserGroup(groupId int, userId int) (*model.Group, error) {
+func (s *ContactsService) GetUserGroup(groupId int, userId int32) (*model.Group, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (s *ContactsService) GetUserGroup(groupId int, userId int) (*model.Group, e
 	return group, nil
 }
 
-func (s *ContactsService) DeleteUserGroup(groupId, userId int) error {
+func (s *ContactsService) DeleteUserGroup(groupId int, userId int32) error {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (s *ContactsService) deleteGroup(txc store.TxContacts, id int) error {
 	return nil
 }
 
-func (s *ContactsService) Invite(groupId, inviterId, inviteeId int) (*model.Member, error) {
+func (s *ContactsService) Invite(groupId int, inviterId int32, inviteeId int32) (*model.Member, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("Begin: %w", err)
@@ -190,11 +190,11 @@ func (s *ContactsService) Invite(groupId, inviterId, inviteeId int) (*model.Memb
 	return member, nil
 }
 
-func (s *ContactsService) join(txc store.TxContacts, groupId, userId int, role access.Role) (*model.Member, error) {
+func (s *ContactsService) join(txc store.TxContacts, groupId int, userId int32, role access.Role) (*model.Member, error) {
 	return txc.CreateMember(groupId, userId, role)
 }
 
-func (s *ContactsService) ListGroupMembers(groupId, userId int) ([]model.Member, error) {
+func (s *ContactsService) ListGroupMembers(groupId int, userId int32) ([]model.Member, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("Begin: %w", err)
@@ -215,7 +215,7 @@ func (s *ContactsService) ListGroupMembers(groupId, userId int) ([]model.Member,
 	return members, nil
 }
 
-func (s *ContactsService) GetMember(groupId, userId, targetId int) (*model.Member, error) {
+func (s *ContactsService) GetMember(groupId int, userId int32, targetId int32) (*model.Member, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("Begin: %w", err)
@@ -236,7 +236,7 @@ func (s *ContactsService) GetMember(groupId, userId, targetId int) (*model.Membe
 	return m, nil
 }
 
-func (s *ContactsService) DeleteMember(groupId, userId, targetId int) error {
+func (s *ContactsService) DeleteMember(groupId int, userId int32, targetId int32) error {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return err
@@ -267,7 +267,7 @@ func (s *ContactsService) DeleteMember(groupId, userId, targetId int) error {
 	return nil
 }
 
-func (s *ContactsService) leave(txc store.TxContacts, groupId, userId int) error {
+func (s *ContactsService) leave(txc store.TxContacts, groupId int, userId int32) error {
 	if ok, err := s.CanLeave(groupId, userId); !ok {
 		if err != nil {
 			return fmt.Errorf("failed to check permission: %w", err)
@@ -281,7 +281,7 @@ func (s *ContactsService) leave(txc store.TxContacts, groupId, userId int) error
 	return nil
 }
 
-func (s *ContactsService) deleteMember(txc store.TxContacts, groupId, userId int) error {
+func (s *ContactsService) deleteMember(txc store.TxContacts, groupId int, userId int32) error {
 	if err := txc.DeleteMember(groupId, userId); err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func (s *ContactsService) ListProfiles(limit int) ([]model.Profile, error) {
 	return profiles, nil
 }
 
-func (s *ContactsService) CreateProfile(userId int, name string) (*model.Profile, error) {
+func (s *ContactsService) CreateProfile(userId int32, name string) (*model.Profile, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
@@ -320,7 +320,7 @@ func (s *ContactsService) CreateProfile(userId int, name string) (*model.Profile
 	return profile, nil
 }
 
-func (s *ContactsService) DeleteProfile(userId int) error {
+func (s *ContactsService) DeleteProfile(userId int32) error {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return err
@@ -347,7 +347,7 @@ func (s *ContactsService) DeleteProfile(userId int) error {
 	return nil
 }
 
-func (s *ContactsService) CanInvite(groupId, inviterId int) (bool, error) {
+func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return false, err
@@ -365,7 +365,7 @@ func (s *ContactsService) CanInvite(groupId, inviterId int) (bool, error) {
 	return false, fmt.Errorf("user '%d' cannot invite members to group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
 }
 
-func (s *ContactsService) CanSend(groupId, userId int) (bool, error) {
+func (s *ContactsService) CanSend(groupId int, userId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return false, err
@@ -386,7 +386,7 @@ func (s *ContactsService) CanSend(groupId, userId int) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanRead(groupId, userId int) (bool, error) {
+func (s *ContactsService) CanRead(groupId int, userId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return false, err
@@ -403,7 +403,7 @@ func (s *ContactsService) CanRead(groupId, userId int) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanLeave(groupId, userId int) (bool, error) {
+func (s *ContactsService) CanLeave(groupId int, userId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return false, err
@@ -421,7 +421,7 @@ func (s *ContactsService) CanLeave(groupId, userId int) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanDeleteMember(groupId, userId, targetId int) (bool, error) {
+func (s *ContactsService) CanDeleteMember(groupId int, userId int32, targetId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return false, err
@@ -440,10 +440,10 @@ func (s *ContactsService) CanDeleteMember(groupId, userId, targetId int) (bool, 
 }
 
 type AccessRequest struct {
-	UserId   int
+	UserId   int32
 	ChatId   int
 	Action   access.Action
-	TargetId int // optional, used for actions that target another user
+	TargetId int32 // optional, used for actions that target another user
 }
 
 func (s *ContactsService) Can(req AccessRequest) (bool, access.Action, error) {

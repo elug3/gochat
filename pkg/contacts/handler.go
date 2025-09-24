@@ -38,7 +38,7 @@ func (h *ContactsHandler) HandleGetGroup(c *gin.Context) {
 }
 
 func (h *ContactsHandler) HandleGetUserGroup(c *gin.Context) {
-	userId, err := strconv.Atoi(c.Param("user_id"))
+	userId, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
@@ -57,7 +57,7 @@ func (h *ContactsHandler) HandleGetUserGroup(c *gin.Context) {
 }
 
 func (h *ContactsHandler) HandleListUserGroup(c *gin.Context) {
-	userId, err := strconv.Atoi(c.Param("user_id"))
+	userId, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
@@ -71,7 +71,7 @@ func (h *ContactsHandler) HandleListUserGroup(c *gin.Context) {
 }
 
 func (h *ContactsHandler) HandleCreateUserGroup(c *gin.Context) {
-	userId, err := strconv.Atoi(c.Param("user_id"))
+	userId, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
@@ -94,7 +94,7 @@ func (h *ContactsHandler) HandleCreateUserGroup(c *gin.Context) {
 
 func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
 	var req struct {
-		UserId int    `json:"user_id" binding:"required"`
+		UserId int32  `json:"user_id" binding:"required"`
 		Name   string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -119,7 +119,7 @@ func (h *ContactsHandler) HandleListProfiles(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, profiles)
 }
 func (h *ContactsHandler) HandleDeleteProfile(c *gin.Context) {
-	userId, err := strconv.Atoi(c.Param("user_id"))
+	userId, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
@@ -137,7 +137,7 @@ func (h *ContactsHandler) HandleListGroupMembers(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
 		return
 	}
-	uid, err := strconv.Atoi(c.Param("user_id"))
+	uid, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
@@ -157,13 +157,13 @@ func (h *ContactsHandler) HandleInviteGroupMember(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
 		return
 	}
-	uid, err := strconv.Atoi(c.Param("user_id"))
+	uid, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
 	var req struct {
-		UserId int `json:"user_id" binding:"required"`
+		UserId int32 `json:"user_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -183,12 +183,12 @@ func (h *ContactsHandler) HandleRemoveGroupMember(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
 		return
 	}
-	uid, err := strconv.Atoi(c.Param("user_id"))
+	uid, err := parseInt32(c.Param("user_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
-	mid, err := strconv.Atoi(c.Param("member_id"))
+	mid, err := parseInt32(c.Param("member_id"))
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid member_id parameter"})
 		return
@@ -202,9 +202,9 @@ func (h *ContactsHandler) HandleRemoveGroupMember(c *gin.Context) {
 
 func (h *ContactsHandler) HandleAccess(c *gin.Context) {
 	var req struct {
-		UserId   int    `form:"user_id" binding:"required"`
+		UserId   int32  `form:"user_id" binding:"required"`
 		ChatId   int    `form:"chat_id"`
-		TargetId int    `form:"target_id"`
+		TargetId int32  `form:"target_id"`
 		Action   string `form:"action"`
 	}
 	err := c.BindQuery(&req)

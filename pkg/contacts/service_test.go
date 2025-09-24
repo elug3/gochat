@@ -12,7 +12,7 @@ import (
 
 func TestContacts_CreateProfile(t *testing.T) {
 	type Row struct {
-		id      int
+		id      int32
 		name    string
 		wantErr error
 	}
@@ -278,7 +278,7 @@ type Preset struct {
 }
 
 type presetProfile struct {
-	userId int
+	userId int32
 	name   string
 }
 

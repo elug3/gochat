@@ -7,7 +7,7 @@ import (
 )
 
 type Profile struct {
-	Id       int        `json:"id"`
+	Id       int32      `json:"id"`
 	Name     string     `json:"name"`
 	Birthday *time.Time `json:"birthday,omitempty"`
 }
@@ -20,7 +20,7 @@ type Group struct {
 
 type Member struct {
 	GroupId   int         `json:"group_id"`
-	UserId    int         `json:"user_id"`
+	UserId    int32       `json:"user_id"`
 	Role      access.Role `json:"role"`
 	Name      string      `json:"name,omitempty"`
 	CreatedAt time.Time   `json:"created_at,omitempty"`

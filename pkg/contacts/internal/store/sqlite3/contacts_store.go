@@ -89,7 +89,7 @@ func (txc *TxContacts) ListGroups(limit int) ([]model.Group, error) {
 	return groups, nil
 }
 
-func (txc *TxContacts) ListUserGroups(userId int) ([]model.Group, error) {
+func (txc *TxContacts) ListUserGroups(userId int32) ([]model.Group, error) {
 	exists, err := txc.profileExists(userId)
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (txc *TxContacts) ListUserGroups(userId int) ([]model.Group, error) {
 	return groups, nil
 }
 
-func (txc *TxContacts) listUserGroups(userId int) ([]model.Group, error) {
+func (txc *TxContacts) listUserGroups(userId int32) ([]model.Group, error) {
 	rows, err := txc.tx.Query(`
 	SELECT g.id, g.name, g.created_at
 	FROM groups g
@@ -166,7 +166,7 @@ func (txc *TxContacts) DeleteGroup(id int) error {
 }
 
 // memberExists checks member exists in group
-func (txc *TxContacts) MemberExists(groupId, userId int) (bool, error) {
+func (txc *TxContacts) MemberExists(groupId int, userId int32) (bool, error) {
 	var memberExists bool
 
 	var profileExists, groupExists bool
@@ -189,7 +189,7 @@ func (txc *TxContacts) MemberExists(groupId, userId int) (bool, error) {
 	return memberExists, nil
 }
 
-func (txc *TxContacts) CreateMember(groupId, userId int, role access.Role) (*model.Member, error) {
+func (txc *TxContacts) CreateMember(groupId int, userId int32, role access.Role) (*model.Member, error) {
 	exists, err := txc.MemberExists(groupId, userId)
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func (txc *TxContacts) CreateMember(groupId, userId int, role access.Role) (*mod
 	return &member, nil
 }
 
-func (txc *TxContacts) GetMember(groupId, userId int) (*model.Member, error) {
+func (txc *TxContacts) GetMember(groupId int, userId int32) (*model.Member, error) {
 	// if exists, err := txc.MemberExists(groupId, userId); !exists {
 	// 	if err != nil {
 	// 		return nil, err
@@ -258,7 +258,7 @@ func (txc *TxContacts) ListGroupMembers(groupId int) ([]model.Member, error) {
 	return members, nil
 }
 
-func (txc *TxContacts) DeleteMember(groupId, userId int) error {
+func (txc *TxContacts) DeleteMember(groupId int, userId int32) error {
 	exists, err := txc.MemberExists(groupId, userId)
 	if err != nil {
 		return err
@@ -284,7 +284,7 @@ func (txc *TxContacts) DeleteMember(groupId, userId int) error {
 	return nil
 }
 
-func (txc *TxContacts) profileExists(id int) (bool, error) {
+func (txc *TxContacts) profileExists(id int32) (bool, error) {
 	var profileExists bool
 	err := txc.tx.QueryRow(`
 	SELECT 
@@ -322,7 +322,7 @@ func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
 	return profiles, nil
 }
 
-func (txc *TxContacts) CreateProfile(userId int, name string) (*model.Profile, error) {
+func (txc *TxContacts) CreateProfile(userId int32, name string) (*model.Profile, error) {
 	if exists, _ := txc.profileExists(userId); exists {
 		return nil, errs.ErrExists
 	}
@@ -342,7 +342,7 @@ func (txc *TxContacts) CreateProfile(userId int, name string) (*model.Profile, e
 	return &profile, nil
 }
 
-func (txc *TxContacts) DeleteProfile(id int) error {
+func (txc *TxContacts) DeleteProfile(id int32) error {
 	if exists, err := txc.profileExists(id); !exists {
 		if err != nil {
 			return err
@@ -367,7 +367,7 @@ func (txc *TxContacts) DeleteProfile(id int) error {
 	return nil
 }
 
-func (txc *TxContacts) FindOwners(userId int) ([]model.Member, error) {
+func (txc *TxContacts) FindOwners(userId int32) ([]model.Member, error) {
 	rows, err := txc.tx.Query(`
 	SELECT group_id, user_id, created_at, role
 	FROM member
