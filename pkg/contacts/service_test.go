@@ -41,7 +41,7 @@ func TestContacts_CreateProfile(t *testing.T) {
 			}
 
 			for i, row := range tc.rows {
-				p, err := s.CreateProfile(row.id, row.name)
+				p, err := s.CreateProfile(t.Context(), row.id, row.name)
 				if !errors.Is(err, row.wantErr) {
 					t.Errorf("row_%d: expected error: %q, got: %q", i, row.wantErr, err)
 					continue
@@ -316,7 +316,7 @@ func setup(t *testing.T, preset *Preset) (*contacts.ContactsService, *PresetResu
 
 	if preset != nil {
 		for key, prep := range preset.profiles {
-			p, err := s.CreateProfile(prep.userId, prep.name)
+			p, err := s.CreateProfile(t.Context(), prep.userId, prep.name)
 			if err != nil {
 				return nil, nil, fmt.Errorf("presetProfile.CreateProfile: %q", err)
 			}

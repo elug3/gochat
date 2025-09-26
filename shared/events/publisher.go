@@ -75,6 +75,20 @@ func initStream(js nats.JetStreamContext) error {
 			return fmt.Errorf("failed to get WEBSOCKET stream info: %w", err)
 		}
 	}
+	if _, err := js.StreamInfo("AUTH"); err != nil {
+		if err == nats.ErrStreamNotFound {
+			if _, err = js.AddStream(&nats.StreamConfig{
+				Name:        "AUTH",
+				Description: "authentication and user management events",
+				Subjects:    []string{SubjectAuthAll},
+				Storage:     nats.FileStorage,
+			}); err != nil {
+				return fmt.Errorf("failed to create AUTH stream: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to get AUTH stream info: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -86,29 +100,37 @@ func initConsumers(js nats.JetStreamContext) error {
 		cfg         *nats.ConsumerConfig
 		opts        []nats.JSOpt
 	}{
-		"CHATVIEW_CONTACTS": {
+		"CHATCMD_CONTACTS": {
 			stream:      "CONTACTS",
-			description: "chatview service consumes contacts events for write model",
+			description: "chatview service consumes contacts events to update contact info",
 			cfg: &nats.ConsumerConfig{
-				Durable:   "chatview",
+				Durable:   "CHATCMD_CONTACTS",
 				AckPolicy: nats.AckNonePolicy,
 			},
 		},
-		"CHATVIEW_MESSAGES": {
+		"CHATCMD_MESSAGES": {
 			stream:      "MESSAGES",
-			description: "chatview service consumes messages for write model",
+			description: "chatcmd service consumes messages to update last message state",
 			cfg: &nats.ConsumerConfig{
-				Durable:   "chatview",
+				Durable:   "CHATCMD_MESSAGES",
 				AckPolicy: nats.AckNonePolicy,
 			},
 		},
-		"MESSAGE_WEBSOCKET": {
+		"WEBSOCKET_MESSAGES": {
 			stream:      "WEBSOCKET",
-			description: "message service consumes websocket events to send messages.",
+			description: "message service consumes websocket events to send messages",
 			cfg: &nats.ConsumerConfig{
-				Durable:    "message",
+				Durable:    "WEBSOCKET_MESSAGES",
 				AckPolicy:  nats.AckExplicitPolicy,
 				MaxDeliver: 3,
+			},
+		},
+		"CONTACTS_USER_REGISTERED": {
+			stream:      "AUTH",
+			description: "contacts service consumes user registered events to create user profile",
+			cfg: &nats.ConsumerConfig{
+				Durable:   "CONTACTS_USER_REGISTERED",
+				AckPolicy: nats.AckExplicitPolicy,
 			},
 		},
 	}

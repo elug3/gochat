@@ -28,7 +28,8 @@ type TxContacts interface {
 	MemberExists(groupId int, userId int32) (bool, error)
 
 	ListProfiles(limit int) ([]model.Profile, error)
-	CreateProfile(userId int32, name string) (*model.Profile, error)
+	GetProfile(userId int32) (*model.Profile, error)
+	CreateProfile(userId int32, name, iconUrl string) (*model.Profile, error)
 	DeleteProfile(userId int32) error
 
 	// FindOwners returns a list of members with RoleOwner for the given user

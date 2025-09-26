@@ -11,7 +11,7 @@ type Event interface {
 
 const (
 	// SubjectUserRegistered is the subject for UserRegistered events.
-	SubjectUserRegistered = "user.registered"
+	SubjectUserRegistered = "auth.registered"
 
 	SubjectGroupCreated = "contacts.group.created"
 	SubjectGroupDeleted = "contacts.group.deleted"
@@ -24,15 +24,17 @@ const (
 )
 
 const (
-	SubjectUserAll      = "user.>"
+	STREAMUS            = "user.>"
 	SubjectContactsAll  = "contacts.>"
 	SubjectMessageAll   = "message.>"
 	SubjectWebsocketAll = "websocket.>"
+	SubjectAuthAll      = "auth.>"
 )
 
 // UserRegistered is published by AuthService after credentials are created for a user.
 type UserRegistered struct {
 	UserId    int32
+	Username  string
 	Timestamp int64
 }
 

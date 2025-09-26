@@ -15,6 +15,7 @@ import (
 	"github.com/alexedwards/argon2id"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
+	"github.com/elug3/gochat/shared/events"
 	"github.com/patrickmn/go-cache"
 
 	"github.com/elug3/gochat/pkg/auth/internal/model"
@@ -29,6 +30,7 @@ type AuthService struct {
 	jwtKey   *rsa.PrivateKey
 	jwks     *jwk.Jwks
 	wsTokens *cache.Cache
+	eventPub *events.Publisher
 }
 
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
@@ -49,7 +51,7 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 }
 
 func NewAuthService(opts *Options) (*AuthService, error) {
-	// Load private key
+	// load private key
 	var jwtKey *rsa.PrivateKey
 	var err error
 
@@ -63,14 +65,20 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 		return nil, fmt.Errorf("failed to load RSA private key: %w", err)
 	}
 
-	// Create JWKs
+	// nats
+	eventPub, err := events.NewPublisher(opts.NatsUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to NATS server: %w", err)
+	}
+
+	// create JWKs
 	jwks := jwk.NewJwks()
 	err = jwks.AddKey(jwtKey.PublicKey, "key1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to add key to JWKs: %w", err)
 	}
 
-	// Initialize store
+	// initialize store
 	store, err := sqlite3.NewAuthStore(opts.SaveDir, opts.InMemory)
 	if err != nil {
 		return nil, err
@@ -80,6 +88,7 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 		jwtKey:   jwtKey,
 		jwks:     jwks,
 		wsTokens: cache.New(5*time.Minute, 10*time.Minute),
+		eventPub: eventPub,
 	}, nil
 }
 
@@ -93,7 +102,7 @@ func credentialsRule(username, password string) error {
 	return nil
 }
 
-func (s *AuthService) RegisterUser(ctx context.Context, username, password string) (int32, error) {
+func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (int32, error) {
 	err := credentialsRule(username, password)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", errs.ErrConstraint, err)
@@ -107,6 +116,16 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password strin
 	if err != nil {
 		return 0, fmt.Errorf("cannot create user '%s': %w", username, err)
 	}
+
+	if name == "" {
+		name = username
+	}
+
+	s.eventPub.Publish(events.UserRegistered{
+		UserId:    userId,
+		Username:  name,
+		Timestamp: time.Now().Unix(),
+	})
 
 	return userId, nil
 }

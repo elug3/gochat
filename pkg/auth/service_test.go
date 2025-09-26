@@ -43,7 +43,7 @@ func TestCreateUser(t *testing.T) {
 
 	for name, tc := range testCase {
 		t.Run(name, func(t *testing.T) {
-			_, err := service.RegisterUser(t.Context(), tc.username, tc.password)
+			_, err := service.RegisterUser(t.Context(), tc.username, tc.password, "test")
 			if (err != nil) != (tc.wantErr != nil) {
 				t.Errorf("expected error: %v, got: %v", tc.wantErr, err)
 			}
@@ -84,7 +84,7 @@ func genTestAccessToken(ctx context.Context, s *auth.AuthService) (int32, string
 	username := genRandomString()
 	password := genRandomString()
 
-	s.RegisterUser(ctx, username, password)
+	s.RegisterUser(ctx, username, password, "test")
 
 	token, err := s.Login(ctx, username, password)
 	if err != nil {

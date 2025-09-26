@@ -1,20 +1,25 @@
 package contacts
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
 	"github.com/elug3/gochat/pkg/contacts/internal/store"
+	"github.com/elug3/gochat/pkg/contacts/internal/store/s3"
 	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
+	"github.com/elug3/identicon"
 	"github.com/rs/zerolog/log"
 )
 
 type ContactsService struct {
-	store store.ContactsStore
-	pub   *events.Publisher
+	store     store.ContactsStore
+	pub       *events.Publisher
+	iconStore *s3.IconStore
 }
 
 func NewContactsService(opts *Options) (*ContactsService, error) {
@@ -26,10 +31,15 @@ func NewContactsService(opts *Options) (*ContactsService, error) {
 	if err != nil {
 		return nil, err
 	}
+	iconStore, err := s3.NewIconStore(opts.S3Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create s3 icon store: %w", err)
+	}
 
 	s := ContactsService{
-		store: contactsStore,
-		pub:   pub,
+		store:     contactsStore,
+		iconStore: iconStore,
+		pub:       pub,
 	}
 	return &s, nil
 }
@@ -302,21 +312,53 @@ func (s *ContactsService) ListProfiles(limit int) ([]model.Profile, error) {
 	return profiles, nil
 }
 
-func (s *ContactsService) CreateProfile(userId int32, name string) (*model.Profile, error) {
+func (s *ContactsService) genNewIcon(ctx context.Context, userId int32) (url string, err error) {
+	idStr := strconv.FormatInt(int64(userId), 10)
+	img := identicon.New([]byte(idStr), 256)
+	err = s.iconStore.UploadIcon(ctx, idStr, img)
+	if err != nil {
+		return "", err
+	}
+	url = fmt.Sprintf("http://localhost:9000/profile-icons/%s.png", idStr)
+	return url, nil
+}
+
+func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name string) (*model.Profile, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer txc.Rollback()
 
-	profile, err := txc.CreateProfile(userId, name)
+	iconUrl, err := s.genNewIcon(ctx, userId)
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
+	}
+	log.Info().Str("icon_url", iconUrl).Msgf("generated icon for user '%d'", userId)
+
+	profile, err := txc.CreateProfile(userId, name, iconUrl)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create profile for user '%d': %w", userId, err)
 	}
+
 	if err = txc.Commit(); err != nil {
 		return nil, err
 	}
 
+	return profile, nil
+}
+
+func (s *ContactsService) GetProfile(userId int32) (*model.Profile, error) {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer txc.Rollback()
+
+	profile, err := txc.GetProfile(userId)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get profile for user '%d': %w", userId, err)
+	}
 	return profile, nil
 }
 

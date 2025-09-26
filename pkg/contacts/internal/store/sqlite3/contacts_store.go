@@ -298,7 +298,7 @@ func (txc *TxContacts) profileExists(id int32) (bool, error) {
 
 func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
 	rows, err := txc.tx.Query(`
-	SELECT user_id, name
+	SELECT user_id, name, icon_url
 	FROM profile
 	LIMIT ?;
 	`, limit)
@@ -310,7 +310,7 @@ func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
 	profiles := make([]model.Profile, 0)
 	for rows.Next() {
 		var profile model.Profile
-		if err = rows.Scan(&profile.Id, &profile.Name); err != nil {
+		if err = rows.Scan(&profile.Id, &profile.Name, &profile.IconUrl); err != nil {
 			return nil, err
 		}
 		profiles = append(profiles, profile)
@@ -322,19 +322,19 @@ func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
 	return profiles, nil
 }
 
-func (txc *TxContacts) CreateProfile(userId int32, name string) (*model.Profile, error) {
+func (txc *TxContacts) CreateProfile(userId int32, name, iconUrl string) (*model.Profile, error) {
 	if exists, _ := txc.profileExists(userId); exists {
 		return nil, errs.ErrExists
 	}
 
 	row := txc.tx.QueryRow(`
-	INSERT INTO profile (user_id, name)
-	VALUES (?, ?)
-	RETURNING user_id, name;
-	`, userId, name)
+	INSERT INTO profile (user_id, name, icon_url)
+	VALUES (?, ?, ?)
+	RETURNING user_id, name, icon_url;
+	`, userId, name, iconUrl)
 	var profile model.Profile
 
-	err := row.Scan(&profile.Id, &profile.Name)
+	err := row.Scan(&profile.Id, &profile.Name, &profile.IconUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +365,19 @@ func (txc *TxContacts) DeleteProfile(id int32) error {
 		return fmt.Errorf("expected 1 row affected, but got: %d", n)
 	}
 	return nil
+}
+
+func (txc *TxContacts) GetProfile(userId int32) (*model.Profile, error) {
+	var profile model.Profile
+	err := txc.tx.QueryRow(`
+	SELECT user_id, name, icon_url
+	FROM profile
+	WHERE user_id = ?
+	`, userId).Scan(&profile.Id, &profile.Name, &profile.IconUrl)
+	if err != nil {
+		return nil, wrapErr(err)
+	}
+	return &profile, nil
 }
 
 func (txc *TxContacts) FindOwners(userId int32) ([]model.Member, error) {
@@ -452,7 +465,9 @@ func initDB(db *sql.DB) error {
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS profile (
 	user_id INTEGER PRIMARY KEY,
-	name varchar(20) NOT NULL
+	name varchar(20) NOT NULL,
+	icon_url varchar(255) NOT NULL
+	
 	);`)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("create table profile: %w", err))

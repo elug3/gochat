@@ -2,6 +2,7 @@ package auth
 
 import (
 	"flag"
+	"os"
 
 	"github.com/rs/zerolog/log"
 )
@@ -16,6 +17,8 @@ type Options struct {
 
 	SaveDir  string
 	InMemory bool
+
+	NatsUrl string
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -37,6 +40,8 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.StringVar(&opts.SaveDir, "save-dir", "./", "Directory to save the database (default: ./) ")
 	fs.BoolVar(&opts.InMemory, "in-memory", false, "Use in-memory database")
 
+	fs.StringVar(&opts.NatsUrl, "nats-url", "", "NATS server URL")
+
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -48,6 +53,15 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	if showHelp {
 		fs.Usage()
 		return nil, nil
+	}
+
+	if opts.NatsUrl == "" {
+		if envVar, ok := os.LookupEnv("NATS_URL"); ok {
+			opts.NatsUrl = envVar
+		} else {
+			opts.NatsUrl = "nats://localhost:4222"
+			log.Warn().Msgf("no NATS URL provided, defaulting to %s", opts.NatsUrl)
+		}
 	}
 
 	if opts.KeyPath == "" && !opts.UseTmpKey {

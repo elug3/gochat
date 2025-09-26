@@ -10,6 +10,7 @@ type Profile struct {
 	Id       int32      `json:"id"`
 	Name     string     `json:"name"`
 	Birthday *time.Time `json:"birthday,omitempty"`
+	IconUrl  string     `json:"icon_url,omitempty"`
 }
 
 type Group struct {

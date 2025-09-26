@@ -14,6 +14,8 @@ type Options struct {
 	NoSave  bool
 
 	NatsUrl string
+
+	S3Endpoint string
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -38,6 +40,14 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 			opts.NatsUrl = envVal
 		} else {
 			opts.NatsUrl = "nats://localhost:4222"
+		}
+	}
+
+	if opts.S3Endpoint == "" {
+		if envVal := os.Getenv("S3_ENDPOINT"); envVal != "" {
+			opts.S3Endpoint = envVal
+		} else {
+			opts.S3Endpoint = "http://localhost:9000"
 		}
 	}
 

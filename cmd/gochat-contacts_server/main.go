@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ func printUsage() {
 }
 
 func main() {
+	ctx := context.Background()
 	fs := flag.NewFlagSet("gochat-contacts_server", flag.ExitOnError)
 	fs.Usage = printUsage
 	opts, err := contacts.ConfigureOptions(fs, os.Args[1:])
@@ -35,6 +37,20 @@ func main() {
 		fmt.Printf("failed to create server: %v\n", err)
 		os.Exit(1)
 	}
+	eventListener, err := contacts.NewEventListener(opts)
+	if err != nil {
+		fmt.Printf("failed to create event listener: %v\n", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		err := eventListener.Run(ctx)
+		if err != nil {
+			fmt.Printf("event listener error: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Printf("server error: %v\n", err)
 		os.Exit(1)

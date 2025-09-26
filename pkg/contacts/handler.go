@@ -102,7 +102,7 @@ func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
 		return
 	}
 
-	p, err := h.contacts.CreateProfile(req.UserId, req.Name)
+	p, err := h.contacts.CreateProfile(c.Request.Context(), req.UserId, req.Name)
 	if err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -229,6 +229,20 @@ func (h *ContactsHandler) HandleAccess(c *gin.Context) {
 	})
 }
 
+func (h *ContactsHandler) HandleGetProfile(c *gin.Context) {
+	userId, err := parseInt32(c.Param("user_id"))
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
+		return
+	}
+	p, err := h.contacts.GetProfile(userId)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "profile not found"})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, p)
+}
+
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/groups", h.HandleListGroups)
@@ -238,6 +252,7 @@ func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/user/:user_id/groups", h.HandleListUserGroup)
 	router.POST("/user/:user_id/groups", h.HandleCreateUserGroup)
+	router.GET("user/:user_id/profile", h.HandleGetProfile)
 
 	router.GET("/user/:user_id/groups/:group_id", h.HandleGetUserGroup)
 	router.GET("/user/:user_id/groups/:group_id/members", h.HandleListGroupMembers)

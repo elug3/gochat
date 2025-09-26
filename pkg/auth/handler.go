@@ -66,6 +66,7 @@ func (h *AuthHandler) HandleLogin(c *gin.Context) {
 func (h *AuthHandler) HandleRegister(c *gin.Context) {
 	var req struct {
 		Username string `json:"username" bind:"required"`
+		Name     string `json:"name"`
 		Password string `json:"password" bind:"required"`
 	}
 	err := c.BindJSON(&req)
@@ -73,7 +74,7 @@ func (h *AuthHandler) HandleRegister(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	userId, err := h.auth.RegisterUser(c.Request.Context(), req.Username, req.Password)
+	userId, err := h.auth.RegisterUser(c.Request.Context(), req.Username, req.Password, req.Name)
 	if err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

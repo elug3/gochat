@@ -10,6 +10,7 @@ services:
     container_name: gochat-contacts_server
     environment:
       - NATS_URL=nats://nats-server:4222
+      - S3_ENDPOINT=http://bucket:9000
     depends_on:
       - nats-server
   auth:
@@ -56,6 +57,13 @@ services:
       - nats-server
       - auth
       - contacts
+  bucket:
+    image: minio/minio
+    container_name: minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: ["server", "/data", "--console-address", ":9001"]
 
   krakend:
     image: krakend:2.10
