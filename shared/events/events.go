@@ -24,11 +24,18 @@ const (
 )
 
 const (
-	STREAMUS            = "user.>"
+	SubjectUserAll      = "user.>"
 	SubjectContactsAll  = "contacts.>"
 	SubjectMessageAll   = "message.>"
 	SubjectWebsocketAll = "websocket.>"
 	SubjectAuthAll      = "auth.>"
+)
+
+const (
+	StreamAuth      = "AUTH"
+	StreamContacts  = "CONTACTS"
+	StreamMessages  = "MESSAGES"
+	StreamWebsocket = "WEBSOCKET"
 )
 
 // UserRegistered is published by AuthService after credentials are created for a user.
@@ -68,7 +75,7 @@ type MessageSent struct {
 	TimeStamp int64
 }
 
-type MessaageRead struct {
+type MessageRead struct {
 	ChatId    int
 	UserId    int32
 	TimeStamp int64
@@ -109,7 +116,7 @@ func (e WebsocketSent) Subject() string {
 	return SubjectWebsocketSent
 }
 
-func (e MessaageRead) Subject() string {
+func (e MessageRead) Subject() string {
 	return SubjectMessageRead
 }
 
@@ -123,7 +130,7 @@ var subjects = map[string]EventFactory{
 	SubjectMemberLeft:     func() Event { return &MemberLeft{} },
 	SubjectMessageSent:    func() Event { return &MessageSent{} },
 	SubjectWebsocketSent:  func() Event { return &WebsocketSent{} },
-	SubjectMessageRead:    func() Event { return &MessaageRead{} },
+	SubjectMessageRead:    func() Event { return &MessageRead{} },
 }
 
 func UnmarshalEvent(subject string, data []byte) (Event, error) {

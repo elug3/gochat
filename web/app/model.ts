@@ -7,6 +7,10 @@ type Chat = {
     unreadCount: number;
 }
 
+type Member = {
+    userId: string;
+    role: "member" | "owner",
+}
 
 type Message = {
     id: number;

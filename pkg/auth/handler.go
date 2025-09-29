@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,8 +17,10 @@ type AuthHandler struct {
 
 func registerRoutes(r gin.IRouter, h *AuthHandler) {
 
+	r.GET("/me", h.HandleAuthInfo)
 	r.POST("/login", h.HandleLogin)
 	r.POST("/register", h.HandleRegister)
+
 	r.GET("/.well-known/jwks.json", h.HandleJwks)
 
 	r.GET("/ws", h.HandleUseWsToken)
@@ -49,13 +53,31 @@ func newAuthHandler(authService *AuthService) *AuthHandler {
 	return &h
 }
 
+func (h *AuthHandler) HandleAuthInfo(c *gin.Context) {
+	tokenString, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid token"})
+		return
+	}
+
+	uid, err := h.auth.ValidateAccessToken(c.Request.Context(), tokenString)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"user_id": uid,
+	})
+
+}
+
 func (h *AuthHandler) HandleLogin(c *gin.Context) {
-	username, paasword, ok := c.Request.BasicAuth()
+	username, password, ok := c.Request.BasicAuth()
 	if !ok {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid authorization header"})
 		return
 	}
-	token, err := h.auth.Login(c.Request.Context(), username, paasword)
+	token, err := h.auth.Login(c.Request.Context(), username, password)
 	if err != nil {
 		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -128,6 +150,18 @@ func (h *AuthHandler) HandleUseWsToken(c *gin.Context) {
 		"user_id": userId,
 	})
 
+}
+
+func parseUserId(c *gin.Context) (int32, error) {
+	uidStr := c.GetString("user_id")
+	if uidStr == "" {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	uid, err := strconv.ParseInt(uidStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid user_id in context")
+	}
+	return int32(uid), nil
 }
 
 func parseBearerToken(r *http.Request) (string, bool) {

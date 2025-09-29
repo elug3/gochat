@@ -4,6 +4,19 @@
     "debug_endpoint": true,
     "endpoints": [
         {
+            "endpoint": "/me",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "input_headers": ["Authorization"],
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/me",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
             "endpoint": "/register",
             "method": "POST",
             "output_encoding": "no-op",
@@ -278,10 +291,30 @@
                 }
             ]
         },
-
-
-
-
+        {
+            "endpoint": "/chats/{chatId}/participants",
+            "@comment": "Get all participants of a chat",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/groups/{chatId}/members",
+                    "host": ["contacts:8080"]
+                }
+            ],
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false 
+                }
+            }
+        },
         {
             "endpoint": "/chats",
             "@comment": "List all chats of the authenticated user",

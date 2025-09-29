@@ -25,6 +25,7 @@ type Member struct {
 	Role      access.Role `json:"role"`
 	Name      string      `json:"name,omitempty"`
 	CreatedAt time.Time   `json:"created_at,omitempty"`
+	IconUrl   string      `json:"icon_url,omitempty"`
 }
 
 // type Message struct {

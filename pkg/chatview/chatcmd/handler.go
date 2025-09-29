@@ -40,6 +40,6 @@ func (s *ChatCommandHandler) OnMessageSent(ctx context.Context, ev *events.Messa
 	return s.store.UpdateLastMessage(ctx, ev.ChatId, ev.Content, ev.TimeStamp)
 }
 
-func (s *ChatCommandHandler) OnMessageRead(ctx context.Context, ev *events.MessaageRead) error {
+func (s *ChatCommandHandler) OnMessageRead(ctx context.Context, ev *events.MessageRead) error {
 	return s.store.UpdateLastReadSeq(ctx, ev.ChatId, ev.UserId)
 }

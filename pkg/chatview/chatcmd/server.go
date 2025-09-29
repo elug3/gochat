@@ -2,6 +2,7 @@ package chatcmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
@@ -29,38 +30,14 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	log.Info().Msg("server started ...")
-	var err error
 
-	s.subc.SubscribeStreams([]string{
-		"CONTACTS",
-		"MESSAGES",
-	}, "CHATVIEW", func(event events.Event) error {
-		switch ev := event.(type) {
-		case *events.GroupCreated:
-			err = s.handler.OnGroupCreated(ctx, ev)
-		case *events.GroupDeleted:
-			err = s.handler.OnGroupDeleted(ctx, ev)
-		case *events.MemberJoined:
-			err = s.handler.OnMemberJoined(ctx, ev)
-		case *events.MemberLeft:
-			err = s.handler.OnMemberLeft(ctx, ev)
-		case *events.MessageSent:
-			err = s.handler.OnMessageSent(ctx, ev)
-		case *events.MessaageRead:
-			err = s.handler.OnMessageRead(ctx, ev)
-		default:
-			log.Warn().Msgf("unknown event type: %T", event)
-			return nil
-		}
-		if err != nil {
-			log.Error().Err(err).Msgf("failed to handle event: %T", event)
-			return err
-		}
-		log.Info().Msgf("event handled: %s", event.Subject())
-		return nil
-	})
+	err := s.subc.PullSubscribeStream(ctx, ">", "CONTACTS", "CHATCMD_CONTACTS", s.handleEvent)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to subscribe to CONTACTS stream: %w", err)
+	}
+
+	if err = s.subc.PullSubscribeStream(ctx, ">", "MESSAGES", "CHATCMD_MESSAGES", s.handleEvent); err != nil {
+		return fmt.Errorf("failed to subscribe to MESSAGES stream: %w", err)
 	}
 
 	<-ctx.Done()
@@ -71,4 +48,32 @@ func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	s.subc.Close()
 	log.Info().Msg("server shut down")
 	return nil
+}
+
+func (s *ChatProjectionServer) handleEvent(event events.Event) error {
+	ctx := context.TODO()
+
+	var err error
+	switch ev := event.(type) {
+	case *events.GroupCreated:
+		err = s.handler.OnGroupCreated(ctx, ev)
+	case *events.GroupDeleted:
+		err = s.handler.OnGroupDeleted(ctx, ev)
+	case *events.MemberJoined:
+		err = s.handler.OnMemberJoined(ctx, ev)
+	case *events.MemberLeft:
+		err = s.handler.OnMemberLeft(ctx, ev)
+	case *events.MessageSent:
+		err = s.handler.OnMessageSent(ctx, ev)
+	case *events.MessageRead:
+		err = s.handler.OnMessageRead(ctx, ev)
+	default:
+		err = fmt.Errorf("unhandled event type: %T", ev)
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("failed to handle event")
+	}
+	log.Info().Msgf("handled event: %T", event)
+
+	return err
 }

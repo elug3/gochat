@@ -52,9 +52,10 @@ func (store *IconStore) UploadIcon(ctx context.Context, name string, img image.I
 
 	uploader := manager.NewUploader(store.client)
 	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
-		Bucket: aws.String("profile-icons"),
-		Key:    aws.String(filename),
-		Body:   data,
+		Bucket:      aws.String("profile-icons"),
+		Key:         aws.String(filename),
+		Body:        data,
+		ContentType: aws.String("image/png"),
 	})
 	if err != nil {
 		return err

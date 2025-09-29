@@ -35,10 +35,10 @@ func NewPublisher(natsUrl string) (*Publisher, error) {
 }
 
 func initStream(js nats.JetStreamContext) error {
-	if _, err := js.StreamInfo("CONTACTS"); err != nil {
+	if _, err := js.StreamInfo(StreamContacts); err != nil {
 		if err == nats.ErrStreamNotFound {
 			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     "CONTACTS",
+				Name:     StreamContacts,
 				Subjects: []string{SubjectContactsAll},
 				Storage:  nats.FileStorage,
 			}); err != nil {
@@ -49,10 +49,10 @@ func initStream(js nats.JetStreamContext) error {
 
 		}
 	}
-	if _, err := js.StreamInfo("MESSAGES"); err != nil {
+	if _, err := js.StreamInfo(StreamMessages); err != nil {
 		if err == nats.ErrStreamNotFound {
 			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     "MESSAGES",
+				Name:     StreamMessages,
 				Subjects: []string{SubjectMessageAll},
 				Storage:  nats.FileStorage,
 			}); err != nil {
@@ -62,10 +62,10 @@ func initStream(js nats.JetStreamContext) error {
 			return fmt.Errorf("failed to get MESSAGES stream info: %w", err)
 		}
 	}
-	if _, err := js.StreamInfo("WEBSOCKET"); err != nil {
+	if _, err := js.StreamInfo(StreamWebsocket); err != nil {
 		if err == nats.ErrStreamNotFound {
 			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     "WEBSOCKET",
+				Name:     StreamWebsocket,
 				Subjects: []string{SubjectWebsocketAll},
 				Storage:  nats.FileStorage,
 			}); err != nil {
@@ -75,10 +75,10 @@ func initStream(js nats.JetStreamContext) error {
 			return fmt.Errorf("failed to get WEBSOCKET stream info: %w", err)
 		}
 	}
-	if _, err := js.StreamInfo("AUTH"); err != nil {
+	if _, err := js.StreamInfo(StreamAuth); err != nil {
 		if err == nats.ErrStreamNotFound {
 			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:        "AUTH",
+				Name:        StreamAuth,
 				Description: "authentication and user management events",
 				Subjects:    []string{SubjectAuthAll},
 				Storage:     nats.FileStorage,
@@ -101,7 +101,7 @@ func initConsumers(js nats.JetStreamContext) error {
 		opts        []nats.JSOpt
 	}{
 		"CHATCMD_CONTACTS": {
-			stream:      "CONTACTS",
+			stream:      StreamContacts,
 			description: "chatview service consumes contacts events to update contact info",
 			cfg: &nats.ConsumerConfig{
 				Durable:   "CHATCMD_CONTACTS",
@@ -109,7 +109,7 @@ func initConsumers(js nats.JetStreamContext) error {
 			},
 		},
 		"CHATCMD_MESSAGES": {
-			stream:      "MESSAGES",
+			stream:      StreamMessages,
 			description: "chatcmd service consumes messages to update last message state",
 			cfg: &nats.ConsumerConfig{
 				Durable:   "CHATCMD_MESSAGES",
@@ -117,7 +117,7 @@ func initConsumers(js nats.JetStreamContext) error {
 			},
 		},
 		"WEBSOCKET_MESSAGES": {
-			stream:      "WEBSOCKET",
+			stream:      StreamWebsocket,
 			description: "message service consumes websocket events to send messages",
 			cfg: &nats.ConsumerConfig{
 				Durable:    "WEBSOCKET_MESSAGES",
@@ -126,7 +126,7 @@ func initConsumers(js nats.JetStreamContext) error {
 			},
 		},
 		"CONTACTS_USER_REGISTERED": {
-			stream:      "AUTH",
+			stream:      StreamAuth,
 			description: "contacts service consumes user registered events to create user profile",
 			cfg: &nats.ConsumerConfig{
 				Durable:   "CONTACTS_USER_REGISTERED",

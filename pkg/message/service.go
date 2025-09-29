@@ -111,7 +111,7 @@ func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId int, u
 		return nil, fmt.Errorf("cannot list messages: %w", err)
 	}
 
-	s.pub.Publish(events.MessaageRead{
+	s.pub.Publish(events.MessageRead{
 		ChatId:    chatId,
 		UserId:    userId,
 		TimeStamp: 0, // TODO: set timestamp

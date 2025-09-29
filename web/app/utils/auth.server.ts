@@ -107,6 +107,26 @@ export async function getChatMessages(request: Request, chatId: string): Promise
     return data as Message[];
 }
 
+export async function getGroupMembers(request: Request, chatId: string): Promise<Member[]> {
+    const session = await getSession(request.headers.get("Cookie"))
+    const token = session.get("accessToken") as string | undefined;
+    
+    if (!token) throw new Error("No access token");
+
+    const res = await fetch(process.env.API_URL + `/chats/${chatId}/participants`, {
+        headers: {
+            "Authorization": "Bearer " + token,
+        }
+    });
+
+    if (!res.ok) throw new Error("Failed to fetch chat members " + res.statusText);
+
+    const jsonData = await res.json();
+    const members = await keysToCamel(jsonData);
+
+    return members as Member[];
+
+}
 
 export async function sendMessage(request: Request, sendParams: {chatId: number, content: string}) {
     const accessToken = await requireAccessToken(request);

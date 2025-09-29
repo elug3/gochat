@@ -1,15 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLoaderData, useParams, type ActionFunctionArgs, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
-import { useChat } from "~/context/chat";
+import { useChatStore } from "~/store/chatStore";
 import { getChatMessages, sendMessage } from "~/utils/auth.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages?: Message[], error?: string }> {
+export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages?: Message[], members?: Member[], error?: string }> {
   const chatId = params.chatId;
   try {
-    
     const messages = await getChatMessages(request, chatId!);
+    // const members = await getGroupMembers(request, chatId!);
     return { messages };
-  } catch (err: any) {
+    } catch (err: any) {
     return { error: err.message };
   }
 }
@@ -81,25 +81,54 @@ function InputComponent() {
 
 type MessageGroup = {
   senderId: number;
+  profile: Profile;
   messages: Message[];
 }
 
+type SpeechBubbleProps = {
+  messageGroup : MessageGroup;
+  currentUserId?: number;
+  openProfileCard: (profile: Profile) => void;
+}
+
+function SpeechBubble({ messageGroup, openProfileCard }: SpeechBubbleProps) {
+  return (
+    <div className="speech-bubble">
+      <div className="message-header">
+        <img src="https://picsum.photos/200" alt="Profile" className="message-icon" onClick={() => {openProfileCard(messageGroup.profile)}}/>
+        <div className="message-group">
+          {messageGroup.messages.map((msg) => (
+            <div key={msg.id} className="message-text">{msg.content}</div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileCard() {
+  return (
+    <div className="profile-card">
+      Profile Card
+    </div>
+  );
+}
+
 export default function ChatDetail() {
+  const [error, setError] = useState<string | null>(null);
   const { chatId } = useParams();
   if (!chatId) {
-    return <div>No chatId selected.</div>;
+    return <div>No chat selected.</div>;
   }
   markAsLoaded(chatId!);
 
   const data = useLoaderData<typeof loader>();
   if (data.error) {
-    return <div>error: {data.error}</div>;
+    setError(data.error);
   }
 
-  const { chatsMessages, setChatsMessages } = useChat();
-  if (setChatsMessages === undefined) {
-    return <div>setChatsMessages is not defined </div>;
-  }
+  const chatsMessages  = useChatStore((s) => s.chatsMessages);
+  const setChatMessages = useChatStore((s) => s.setChatMessages);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -107,30 +136,28 @@ export default function ChatDetail() {
     bottomRef.current?.scrollIntoView({ behavior: "auto"});
     
     if (chatsMessages[chatId] === undefined) {
-      setChatsMessages((prev) => {
-        return { ...prev, [chatId]: data.messages || [] };
-      });
+      setChatMessages(chatId, data.messages || []);
     }
   }, [chatId]);
 
   // Handle undefined chatMessages state. It must be after useEffect above.
   if (chatsMessages[chatId] === undefined) {
-    return <div>chat messages are not loaded yet.</div>;
+    setError("Chat messages are not loaded yet.");
   }
 
   const messages = chatsMessages[chatId] || [];
 
   const groupedMessages: MessageGroup[] = [];
-  let currentGroup: MessageGroup | null = null
+  let currentGroup: MessageGroup | null = null;
 
-  console.log(groupedMessages);
+  const chatsParticipants = useChatStore((s) => s.chatsParticipants);
 
   messages.forEach((msg) => {
     // new speech bubble if:
     // 1. first message
     // 2. different sender
     if (!currentGroup || currentGroup.senderId !== msg.sender) {
-      currentGroup = { senderId: msg.sender, messages: [msg] };
+      currentGroup = { senderId: msg.sender, messages: [msg], profile: nullss };
       groupedMessages.push(currentGroup);
       
     } else {
@@ -143,7 +170,13 @@ export default function ChatDetail() {
     groupedMessages.push(currentGroup);
   }
 
-
+  const [cardProfile, setCardProfile] = useState<Profile | null>(null);
+  function openProfileCard(profile: Profile) {
+    setCardProfile(profile);
+  }
+  function closeProfileCard() {
+    setCardProfile(null);
+  }
 
   return (
     <div className="w-full h-full flex flex-col">
@@ -159,30 +192,28 @@ export default function ChatDetail() {
       </header>
 
       {/* Messages */}
-      <div className="messages-container">
-        {groupedMessages.length === 0 ? (
-          <div>No messages yet. Start the conversation!</div>
-        ) : (
-          groupedMessages.map((group, idx) => (
-            <div key={idx} className="messages-speech-bubble">
-              {group.messages.map((msg) => (
-                <div key={msg.id} className="">
-                  {msg.content}
-                </div>
-              ))}
-            </div>
-          ))
-        )}
+        <div className="messages-container">
+          {groupedMessages.length === 0 ? (
+            <div>No messages yet. Start the conversation!</div>
+          ) : (
+            groupedMessages.map((group, idx) => (
+              <SpeechBubble key={idx} messageGroup={group} openProfileCard={openProfileCard} />
+            )
+          ))}
 
-        <div ref={bottomRef}></div>
+          <div ref={bottomRef}></div>
+        </div>
+
+        {/* Input */}
+        <div>
+          <InputComponent />
+        </div>
+
+        {/* Profile card */}
+        <div>
+          {cardProfile && <ProfileCard/>}
+        </div>
       </div>
-
-      {/* Input */}
-      <div>
-        <InputComponent />
-      </div>
-
-    </div>
   );
 }
 

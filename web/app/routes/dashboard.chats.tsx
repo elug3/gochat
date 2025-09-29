@@ -1,9 +1,8 @@
+import { use, useEffect } from "react";
 import { Link, NavLink, Outlet, redirect, useLoaderData, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
-import { ChatProvider, useChat } from "~/context/chat";
+import { useChatWebSocket } from "~/hooks/useChatWebsocket";
+import { useChatStore } from "~/store/chatStore";
 import { fetchChatList, getWsToken } from "~/utils/auth.server";
-
-const API_BASE = "http://localhost:8080";
-
 
 export type ChatData = {
   chats: Chat[];
@@ -25,7 +24,8 @@ export function shouldRevalidate({ formAction }: ShouldRevalidateFunctionArgs) {
 }
 
 export function Sidebar() {
-  const {chats, wsState} = useChat();
+  const chats = useChatStore((s) => s.chats);
+  const wsState = useChatStore((s) => s.wsState);
 
   const chatList = Object.values(chats || {}).flat();
 
@@ -84,27 +84,39 @@ export function Sidebar() {
 }
 
 export default function Chats() {
-  const {chats, wsToken, error} = useLoaderData<typeof loader>();
-  if (error) {
-    return <div>Error: {error}</div>;
+  const loaderData = useLoaderData<typeof loader>();
+  if (loaderData.error) {
+    return <div>Error: {loaderData.error}</div>;
   }
-  if (!chats) {
+  if (!loaderData.chats) {
     return <div>Failed to load chats</div>;
   }
-  if (!wsToken) {
+  if (!loaderData.wsToken) {
     return <div>Failed to get websocket token</div>;
   }
 
+  const setChats = useChatStore((s) => s.setChats);
+
+  useEffect(() => {
+    const chats = loaderData.chats?.reduce((acc, chat) => {
+      acc[chat.id] = chat;
+      return acc;
+    }, {} as Record<string, Chat>);
+
+    setChats(chats!);
+  }, [loaderData, setChats]);
+
+  // start websocket
+  useChatWebSocket(loaderData.wsToken);
+
   return (
-    <ChatProvider initialChatData={{chats, wsToken}}>
-      <div className="page">
+    <div className="page">
         <Sidebar />
 
         {/* content */}
         <main className="">
           <Outlet /> {/* <p>loading</p> will be centered */}
         </main>
-      </div>
-    </ChatProvider>
+    </div>
   );
 }

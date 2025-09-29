@@ -334,7 +334,6 @@ func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name 
 	if err != nil {
 		return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
 	}
-	log.Info().Str("icon_url", iconUrl).Msgf("generated icon for user '%d'", userId)
 
 	profile, err := txc.CreateProfile(userId, name, iconUrl)
 	if err != nil {
