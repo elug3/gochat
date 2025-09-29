@@ -3,10 +3,15 @@ import { useFetcher, useLoaderData, useParams, type ActionFunctionArgs, type Loa
 import { useChat } from "~/context/chat";
 import { getChatMessages, sendMessage } from "~/utils/auth.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages: Message[] }> {
+export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages?: Message[], error?: string }> {
   const chatId = params.chatId;
-  const messages = await getChatMessages(request, chatId!);
-  return { messages };
+  try {
+    
+    const messages = await getChatMessages(request, chatId!);
+    return { messages };
+  } catch (err: any) {
+    return { error: err.message };
+  }
 }
 
 export async function action({request, params}: ActionFunctionArgs) {
@@ -22,7 +27,23 @@ export async function action({request, params}: ActionFunctionArgs) {
   return {ok: true};
 }
 
-export function shouldRevalidate({ formAction }: ShouldRevalidateFunctionArgs) {
+const loaded: Set<string> = new Set();
+
+function isLoaded(chatId: string) {
+  return loaded.has(chatId);
+}
+
+function markAsLoaded(chatId: string) {
+  loaded.add(chatId);
+}
+
+export function shouldRevalidate({nextUrl}: ShouldRevalidateFunctionArgs) {
+  if (nextUrl.pathname.includes("/dashboard/chats/")) {
+    const chatId = nextUrl.pathname.split("/").pop();
+    if (chatId && !isLoaded(chatId)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -40,17 +61,17 @@ function InputComponent() {
   }, [fetcher.state]);
 
   return (
-    <fetcher.Form method="post" className="flex border-t p-2">
+    <fetcher.Form method="post" className="flex">
       <input
         type="text"
         name="content"
         ref={inputRef}
         placeholder="Type a message..."
-        className="flex-1 border rounded p-2"
+        className=""
       />
       <button
         type="submit"
-        className="ml-2 bg-blue-600 text-white px-4 rounded"
+        className="send-button"
       >
         Send
       </button>
@@ -58,51 +79,101 @@ function InputComponent() {
   );
 }
 
+type MessageGroup = {
+  senderId: number;
+  messages: Message[];
+}
+
 export default function ChatDetail() {
   const { chatId } = useParams();
   if (!chatId) {
-    return <div>No chat selected.</div>;
+    return <div>No chatId selected.</div>;
   }
+  markAsLoaded(chatId!);
 
-  const { chatsMessages, setChatsMessages} = useChat();
-  if (!setChatsMessages) {
-    return <div>Loading...</div>;
-  }
-  
   const data = useLoaderData<typeof loader>();
-  if (chatsMessages[chatId] === undefined) {
-    setChatsMessages(prev => ({...prev, [chatId]: data.messages}));
+  if (data.error) {
+    return <div>error: {data.error}</div>;
   }
 
-  const messages = chatsMessages[chatId];
-
+  const { chatsMessages, setChatsMessages } = useChat();
+  if (setChatsMessages === undefined) {
+    return <div>setChatsMessages is not defined </div>;
+  }
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "instant"});
-  }, [messages])
+    bottomRef.current?.scrollIntoView({ behavior: "auto"});
+    
+    if (chatsMessages[chatId] === undefined) {
+      setChatsMessages((prev) => {
+        return { ...prev, [chatId]: data.messages || [] };
+      });
+    }
+  }, [chatId]);
+
+  // Handle undefined chatMessages state. It must be after useEffect above.
+  if (chatsMessages[chatId] === undefined) {
+    return <div>chat messages are not loaded yet.</div>;
+  }
+
+  const messages = chatsMessages[chatId] || [];
+
+  const groupedMessages: MessageGroup[] = [];
+  let currentGroup: MessageGroup | null = null
+
+  console.log(groupedMessages);
+
+  messages.forEach((msg) => {
+    // new speech bubble if:
+    // 1. first message
+    // 2. different sender
+    if (!currentGroup || currentGroup.senderId !== msg.sender) {
+      currentGroup = { senderId: msg.sender, messages: [msg] };
+      groupedMessages.push(currentGroup);
+      
+    } else {
+      // same sender, add to same speech bubble
+      currentGroup.messages.push(msg);
+    }
+  });
+  // push the last group if not already pushed
+  if (currentGroup && groupedMessages[groupedMessages.length - 1] !== currentGroup) {
+    groupedMessages.push(currentGroup);
+  }
+
+
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="w-full h-full flex flex-col">
       {/* Chat header */}
-      <header className="border-b pb-2 mb-2 font-bold">
-        Chat with 
+      <header className="chat-header">
+        <div className="chat-header-left">
+          <button>back</button>
+          <h2 className="chat-name">Chat with {chatId}</h2>
+        </div>
+        <div className="chat-header-right">
+          hello
+        </div>
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-2 p-2">
-        {messages === undefined || messages.length === 0 ? (
-          <div>No messages yet.</div>
+      <div className="messages-container">
+        {groupedMessages.length === 0 ? (
+          <div>No messages yet. Start the conversation!</div>
         ) : (
-          messages.map((msg) => (
-            <div key={msg.id} className="p-2 bg-gray-100 rounded">
-              <div className="text-sm text-gray-600">{msg.chatId}</div>
-              <div>{msg.content}</div>
-              <div className="text-xs text-gray-500">{msg.sentAt}</div>
+          groupedMessages.map((group, idx) => (
+            <div key={idx} className="messages-speech-bubble">
+              {group.messages.map((msg) => (
+                <div key={msg.id} className="">
+                  {msg.content}
+                </div>
+              ))}
             </div>
           ))
         )}
+
         <div ref={bottomRef}></div>
       </div>
 
@@ -114,3 +185,4 @@ export default function ChatDetail() {
     </div>
   );
 }
+

@@ -1,5 +1,6 @@
-import { getSession } from "~/session.server";
+import { commitSession, getSession } from "~/session.server";
 import { camelToSnake, keysToCamel } from "./case";
+import { redirect } from "react-router";
 
 export async function getAccessToken(request: Request) {
     const session = await getSession(request.headers.get("Cookie"));
@@ -33,13 +34,41 @@ export async function getUser(request: Request) {
     return res.json();
 }
 
-// export async function requireUser(request: Request) {
-//     const user = await getUser(request);
-//     if (!user) {
-//         return redirect("/login");
-//     }
-//     return user;
-// }
+export async function login(username: string, password: string): Promise<{accessToken: string, userId: number}> {
+    const res = await fetch(process.env.AUTH_URL + "/login", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Basic " + btoa(`${username}:${password}`),
+        },
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error);
+    }
+    const {AccessToken, UserId} = await res.json();
+
+    return { accessToken: AccessToken, userId: UserId }; 
+}
+
+
+export async function register(username: string, password: string, name: string) {
+    const resp = await fetch(process.env.API_URL + "/register", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({username, password, name}),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error)
+    }
+    
+    return {};
+}
 
 export async function getChats(request: Request) {
     const session = await getSession(request.headers.get("Cookie"));
@@ -127,11 +156,13 @@ export async function getWsToken(request: Request): Promise<string> {
     return wsToken;
 }
 
+export class ErrUnauthorized extends Error {}
+
 export async function fetchChatList(request: Request): Promise<Chat[]> {
     const token = await getAccessToken(request);
 
     if (!token) {
-        throw new Error("No access token");
+        throw new ErrUnauthorized("No access token");
     }
     
     const res = await fetch(process.env.API_URL + "/chats", {
@@ -141,6 +172,9 @@ export async function fetchChatList(request: Request): Promise<Chat[]> {
     });
 
     if (!res.ok) {
+        if (res.status === 401) {
+            throw new ErrUnauthorized("Unauthorized access");
+        }
         throw new Error("Failed to fetch chats");
     }
     const jsonData = await res.json();

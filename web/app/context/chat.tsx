@@ -3,6 +3,7 @@ import type { ChatData } from "~/routes/dashboard.chats";
 
 type ChatContextType = {
     chats: Record<string, Chat>;
+    chatsParticipants?: Record<string, Record<string, Profile>>;
     chatsMessages: Record<string, Message[]>;
     setChatsMessages?: Dispatch<SetStateAction<Record<string, Message[]>>>;
     wsState: WsState;
@@ -26,11 +27,9 @@ export function ChatProvider({children, initialChatData}: {children: ReactNode, 
     const onMessage = (message: Message) => {
         setChatsMessages((prev) => {
             if (!prev[message.chatId]) {
-                prev[message.chatId] = [];
+                return {};
             }
-            prev[message.chatId].push(message);
-            console.log("Updated messages:", prev);
-            return {...prev, [message.chatId]: [...prev[message.chatId]]};
+            return {...prev, [message.chatId]: [...prev[message.chatId], message]};
         });
 
         setChats((prev) => {

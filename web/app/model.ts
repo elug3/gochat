@@ -15,3 +15,10 @@ type Message = {
     content: string;
     sentAt: number;
 }
+
+type Profile = {
+    userId: string;
+    name: string;
+    status: "online" | "offline";
+    avatarUrl?: string;
+}
