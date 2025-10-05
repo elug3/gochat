@@ -28,6 +28,13 @@ type Member struct {
 	IconUrl   string      `json:"icon_url,omitempty"`
 }
 
+type Contact struct {
+	ProfileId int32     `json:"profile_id"`
+	Name      string    `json:"name"`
+	Alias     string    `json:"alias,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // type Message struct {
 // 	Id      int       `json:"id"`
 // 	ChatId  int       `json:"chat_id"`

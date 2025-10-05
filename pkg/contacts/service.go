@@ -388,6 +388,18 @@ func (s *ContactsService) DeleteProfile(userId int32) error {
 	return nil
 }
 
+func (s *ContactsService) ListUserContacts(userId int32) ([]model.Contact, error) {
+}
+
+func (s *ContactsService) AddToContacts(userId int32, targetId int32) error {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return err
+	}
+	defer txc.Rollback()
+
+}
+
 func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) {
 	txc, err := s.store.Begin()
 	if err != nil {

@@ -243,6 +243,20 @@ func (h *ContactsHandler) HandleGetProfile(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, p)
 }
 
+func (h *ContactsHandler) HandleListContacts(c *gin.Context) {
+	userId, err := parseUserId(c)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
+		return
+	}
+	contacts, err := h.contacts.ListUserContacts(userId)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, contacts)
+}
+
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/groups", h.HandleListGroups)
@@ -262,6 +276,8 @@ func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 	router.GET("/profiles", h.HandleListProfiles)
 	router.POST("/profiles", h.HandleCreateProfile)
 	router.DELETE("/profiles/:user_id", h.HandleDeleteProfile)
+
+	router.GET("/contacts", h.HandleListContacts)
 }
 
 func newContactsHandler(contacts *ContactsService) *ContactsHandler {
@@ -281,4 +297,9 @@ func (h *ContactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func parseInt32(s string) (int32, error) {
 	i64, err := strconv.ParseInt(s, 10, 32)
 	return int32(i64), err
+}
+
+// parseUserId parses user_id from path parameter
+func parseUserId(c *gin.Context) (int32, error) {
+	return parseInt32(c.Param("user_id"))
 }

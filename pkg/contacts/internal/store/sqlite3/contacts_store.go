@@ -342,6 +342,26 @@ func (txc *TxContacts) CreateProfile(userId int32, name, iconUrl string) (*model
 	return &profile, nil
 }
 
+func (txc *TxContacts) UpdateProfile(userId int32, name, iconUrl string) (*model.Profile, error) {
+	if exists, err := txc.profileExists(userId); !exists {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errs.ErrUserNotExists
+	}
+
+	_, err := txc.tx.Exec(`
+	UPDATE profile
+	SET name = ?, icon_url = ?
+	WHERE user_id = ?;
+	`, name, iconUrl, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	return txc.GetProfile(userId)
+}
+
 func (txc *TxContacts) DeleteProfile(id int32) error {
 	if exists, err := txc.profileExists(id); !exists {
 		if err != nil {
@@ -378,6 +398,99 @@ func (txc *TxContacts) GetProfile(userId int32) (*model.Profile, error) {
 		return nil, wrapErr(err)
 	}
 	return &profile, nil
+}
+
+func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*model.Contact, error) {
+	// owner exists
+	if exists, err := txc.profileExists(ownerId); !exists {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errs.ErrUserNotExists
+	}
+
+	// target exists
+	if exists, err := txc.profileExists(targetId); !exists {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errs.ErrUserNotExists
+	}
+
+	if alias != nil && *alias == "" {
+		alias = nil
+	}
+
+	// TODO: improve query
+	row := txc.tx.QueryRow(`
+	INSERT INTO contacts (owner_id, target_id, alias)
+	VALUES (?, ?, ?)
+	RETURNING target_id, (SELECT name FROM profile WHERE user_id = target_id), COALESCE(alias, ''), created_at;
+	`, ownerId, targetId, alias)
+
+	var contact model.Contact
+	if err := row.Scan(&contact.ProfileId, &contact.Name, &contact.Alias, &contact.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &contact, nil
+}
+
+func (txc *TxContacts) ListUserContacts(userId int32) ([]model.Contact, error) {
+	if exists, err := txc.profileExists(userId); !exists {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errs.ErrUserNotExists
+	}
+
+	rows, err := txc.tx.Query(`
+	SELECT p.user_id, p.name, c.alias, c.created_at
+	FROM contacts c
+	JOIN profile p ON c.target_id = p.user_id
+	WHERE c.owner_id = ?;
+	`, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	contacts := make([]model.Contact, 0)
+	for rows.Next() {
+		var contact model.Contact
+		if err = rows.Scan(&contact.ProfileId, &contact.Name, &contact.Alias, &contact.CreatedAt); err != nil {
+			return nil, err
+		}
+		contacts = append(contacts, contact)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return contacts, nil
+}
+
+func (txc *TxContacts) DeleteUserContact(ownerId, targetId int32) error {
+	if exists, err := txc.profileExists(ownerId); !exists {
+		if err != nil {
+			return err
+		}
+		return errs.ErrUserNotExists
+	}
+
+	result, err := txc.tx.Exec(`
+	DELETE FROM contacts
+	WHERE owner_id = ? AND target_id = ?;
+	`, ownerId, targetId)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("expected to delete 1 row, but deleted %d", n)
+	}
+	return nil
 }
 
 func (txc *TxContacts) FindOwners(userId int32) ([]model.Member, error) {
@@ -437,8 +550,8 @@ func initDB(db *sql.DB) error {
 	// 	errs = append(errs, err)
 	// }
 
+	// create group table
 	_, err := db.Exec(`
-	 
 	CREATE TABLE IF NOT EXISTS groups (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	name varchar(50) NOT NULL CHECK(length(name) >= 2),
@@ -448,6 +561,7 @@ func initDB(db *sql.DB) error {
 		errs = append(errs, fmt.Errorf("create table group: %w", err))
 	}
 
+	// create member table
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS member (
 	user_id INTEGER NOT NULL,
@@ -462,15 +576,31 @@ func initDB(db *sql.DB) error {
 		errs = append(errs, fmt.Errorf("create table member: %w", err))
 	}
 
+	// create profile table
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS profile (
 	user_id INTEGER PRIMARY KEY,
 	name varchar(20) NOT NULL,
 	icon_url varchar(255) NOT NULL
-	
 	);`)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("create table profile: %w", err))
 	}
+
+	// create contact table
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS contacts (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner_id INTEGER NOT NULL,
+	target_id INTEGER NOT NULL,
+	alias varchar(50),
+	created_at TIMESTAMP DEFAULT (datetime('now')),
+	FOREIGN KEY(owner_id) REFERENCES profile(user_id) ON DELETE CASCADE,
+	FOREIGN KEY(target_id) REFERENCES profile(user_id) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("create table contacts: %w", err))
+	}
+
 	return errors.Join(errs...)
 }
