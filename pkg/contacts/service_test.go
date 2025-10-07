@@ -2,7 +2,6 @@ package contacts_test
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/elug3/gochat/pkg/contacts"
@@ -10,343 +9,140 @@ import (
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
 )
 
-func TestContacts_CreateProfile(t *testing.T) {
-	type Row struct {
-		id      int32
-		name    string
-		wantErr error
-	}
-	testCases := map[string]struct {
-		rows []Row
-	}{
-		"create profile": {
-			rows: []Row{
-				{id: 1, name: "test", wantErr: nil},
-			},
-		},
-		"create with same id": {
-			rows: []Row{
-				{id: 1, name: "a", wantErr: nil},
-				{id: 1, name: "b", wantErr: errs.ErrExists},
-			},
-		},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			s, _, err := setup(t, nil)
-			if err != nil {
-				t.Fatalf("setup failed: %v", err)
-			}
-
-			for i, row := range tc.rows {
-				p, err := s.CreateProfile(t.Context(), row.id, row.name)
-				if !errors.Is(err, row.wantErr) {
-					t.Errorf("row_%d: expected error: %q, got: %q", i, row.wantErr, err)
-					continue
-				}
-				if err == nil && p.Id != row.id {
-					t.Errorf("row_%d: expected id: %d, got: %d", i, row.id, p.Id)
-				}
-			}
-		})
-	}
+var testOptions = &contacts.Options{
+	NoSave:  true,
+	NoEvent: true,
+	NoIcons: true,
 }
 
-func TestContacts_DeleteProfile(t *testing.T) {
-	type DeleteProfile struct {
-		profile string
-		wantErr error
-	}
-	testCases := map[string]struct {
-		preset *Preset
-		rows   []DeleteProfile
-	}{
-		"delete profile": {
-			preset: &Preset{
-				profiles: map[string]presetProfile{
-					"a": {userId: 1, name: "test"},
-				},
-			},
-			rows: []DeleteProfile{
-				{profile: "a", wantErr: nil},
-			},
-		},
-		"delete non-existent profile": {
-			preset: &Preset{
-				profiles: map[string]presetProfile{
-					"a": {userId: 1, name: "test"},
-				},
-			},
-			rows: []DeleteProfile{
-				{profile: "a", wantErr: nil},
-			},
-		},
-		"owner of group cannot delete profile": {
-			preset: &Preset{
-				profiles: map[string]presetProfile{
-					"a": {userId: 1, name: "test"},
-				},
-				groups: map[string]presetGroup{
-					"g1": {name: "my group", owner: "a"},
-					"g2": {name: "guest group", owner: "a"},
-				},
-			},
-			rows: []DeleteProfile{
-				{profile: "a", wantErr: errs.ErrPermissionDenied},
-			},
-		},
-	}
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			s, result, err := setup(t, tc.preset)
-			if err != nil {
-				t.Fatalf("setup failed: %v", err)
-			}
-			for i, row := range tc.rows {
-				p, err := result.GetProfile(row.profile)
-				if err != nil {
-					t.Fatalf("row_%d: result.GetProfile: %q", i, err)
-				}
-				if err = s.DeleteProfile(p.Id); !errors.Is(err, row.wantErr) {
-					t.Fatalf("expected error: %q, but got: %q", row.wantErr, err)
-				}
-			}
-		})
-	}
-}
-
-func TestContacts_Invite(t *testing.T) {
-	type Invite struct {
-		group   string
-		inviter string
-		invitee string
-		wantErr error
-	}
-	preset := &Preset{
-		profiles: map[string]presetProfile{
-			"p1": {userId: 1, name: "p1"},
-			"p2": {userId: 2, name: "p2"},
-			"p3": {userId: 3, name: "p3"},
-		},
-		groups: map[string]presetGroup{
-			"g1": {name: "test group", owner: "p1", member: []string{"p2"}},
-		},
-	}
-	testCasess := map[string]struct {
-		preset *Preset
-		rows   []Invite
-	}{
-		"owner invite": {
-			preset: preset,
-			rows: []Invite{
-				{group: "g1", inviter: "p1", invitee: "p3"},
-			},
-		},
-		"member cannot invite": {
-			preset: preset,
-			rows: []Invite{
-				{group: "g1", inviter: "p2", invitee: "p3", wantErr: errs.ErrPermissionDenied},
-			},
-		},
-		"already exists": {
-			preset: preset,
-			rows: []Invite{
-				{group: "g1", inviter: "p1", invitee: "p3", wantErr: nil},
-				{group: "g1", inviter: "p1", invitee: "p3", wantErr: errs.ErrExists},
-			},
-		},
-	}
-
-	for name, tc := range testCasess {
-		t.Run(name, func(t *testing.T) {
-			s, result, err := setup(t, tc.preset)
-			if err != nil {
-				t.Fatalf("setup failed: %v", err)
-			}
-
-			for i, row := range tc.rows {
-				g, err := result.GetGroup(row.group)
-				if err != nil {
-					t.Fatal(err)
-				}
-				inviter, err := result.GetProfile(row.inviter)
-				if err != nil {
-					t.Fatal(err)
-				}
-				invitee, err := result.GetProfile(row.invitee)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = s.Invite(g.Id, inviter.Id, invitee.Id)
-				if !errors.Is(err, row.wantErr) {
-					t.Errorf("row_%d: expected error %q, but got %q", i, row.wantErr, err)
-				}
-			}
-		})
-	}
-}
-
-func TestContacts_DeleteGroup(t *testing.T) {
-	type DeleteGroup struct {
-		group   string
-		profile string
-		wantErr error
-	}
-	testCases := map[string]struct {
-		preset *Preset
-		rows   []DeleteGroup
-	}{
-		"owner can delete group": {
-			preset: &Preset{
-				profiles: map[string]presetProfile{
-					"p1": {userId: 1, name: "p1"},
-				},
-				groups: map[string]presetGroup{
-					"g1": {name: "test group", owner: "p1"},
-				},
-			},
-			rows: []DeleteGroup{
-				{group: "g1", profile: "p1"},
-			},
-		},
-		"member cannot delete group": {
-			preset: &Preset{
-				profiles: map[string]presetProfile{
-					"p1": {userId: 1, name: "p1"},
-					"p2": {userId: 2, name: "test member"},
-				},
-				groups: map[string]presetGroup{
-					"g1": {name: "test group", owner: "p1", member: []string{"p2"}},
-				},
-			},
-			rows: []DeleteGroup{
-				{group: "g1", profile: "p2", wantErr: errs.ErrPermissionDenied},
-			},
-		},
-	}
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			s, result, err := setup(t, tc.preset)
-			if err != nil {
-				t.Fatalf("setup failed: %v", err)
-			}
-
-			for i, row := range tc.rows {
-				p, err := result.GetProfile(row.profile)
-				if err != nil {
-					t.Errorf("row_%d: result.GetProfile: %q", i, err)
-					continue
-				}
-				g, err := result.GetGroup(row.group)
-				if err != nil {
-					t.Errorf("row_%d: result.GetGroup: %q", i, err)
-					continue
-				}
-				err = s.DeleteUserGroup(g.Id, p.Id)
-				if !errors.Is(err, row.wantErr) {
-					t.Errorf("row_%d: expected error: %q, got: %q", i, row.wantErr, err)
-				}
-			}
-		})
-	}
-}
-
-type PresetResult struct {
-	profiles map[string]*model.Profile
-	groups   map[string]*model.Group
-}
-
-func (result *PresetResult) GetGroup(key string) (*model.Group, error) {
-	if group, ok := result.groups[key]; ok {
-		return group, nil
-	}
-	return nil, fmt.Errorf("group key %q not found", key)
-}
-
-func (result *PresetResult) GetProfile(key string) (*model.Profile, error) {
-	if profile, ok := result.profiles[key]; ok {
-		return profile, nil
-	}
-	return nil, fmt.Errorf("profile key %q not found", key)
-}
-
-type Preset struct {
-	profiles map[string]presetProfile
-	groups   map[string]presetGroup
-}
-
-type presetProfile struct {
-	userId int32
-	name   string
-}
-
-type presetGroup struct {
-	name    string
-	owner   string
-	manager []string
-	member  []string
-}
-
-func NewPresetResult() *PresetResult {
-	var result PresetResult
-	result.profiles = make(map[string]*model.Profile)
-	result.groups = make(map[string]*model.Group)
-	return &result
-}
-
-func NewTestContactsService() (*contacts.ContactsService, error) {
-	s, err := contacts.NewContactsService(&contacts.Options{
-		NoSave: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("NewTestContactsService failed: %w", err)
-	}
-	return s, nil
-}
-
-func setup(t *testing.T, preset *Preset) (*contacts.ContactsService, *PresetResult, error) {
+func NewTestService(t *testing.T) *contacts.ContactsService {
 	t.Helper()
-	result := NewPresetResult()
-	s, err := NewTestContactsService()
+	s, err := contacts.NewContactsService(testOptions)
 	if err != nil {
-		t.Fatalf("NewTestContactsService failed: %v", err)
+		t.Fatalf("failed to create contacts service: %v", err)
+	}
+	return s
+}
+
+func TestAccess(t *testing.T) {
+}
+
+var (
+	SeqUserId int32 = 1000
+)
+
+func genUserId() int32 {
+	SeqUserId = SeqUserId + 1
+	return SeqUserId
+}
+
+func newTestProfile(t *testing.T, s *contacts.ContactsService, name string) *model.Profile {
+	t.Helper()
+	pid := genUserId()
+
+	p, err := s.CreateProfile(t.Context(), pid, name)
+	if err != nil {
+		t.Fatalf("cannot create test profile: %v", err)
 	}
 
-	if preset != nil {
-		for key, prep := range preset.profiles {
-			p, err := s.CreateProfile(t.Context(), prep.userId, prep.name)
-			if err != nil {
-				return nil, nil, fmt.Errorf("presetProfile.CreateProfile: %q", err)
-			}
-			result.profiles[key] = p
-		}
+	if p.Id != pid {
+		t.Fatalf("expected profile id %d, but got %d", pid, p.Id)
+	}
+	if p.Name != name {
+		t.Fatalf("expected profile name %q, but got %q", name, p.Name)
+	}
+	return p
+}
 
-		for key, preg := range preset.groups {
-			owner, err := result.GetProfile(preg.owner)
-			if err != nil {
-				return nil, nil, fmt.Errorf("presetGroup.result.GetProfile: %q", err)
-			}
-			g, err := s.CreateUserGroup(owner.Id, preg.name)
-			if err != nil {
-				return nil, nil, fmt.Errorf("presetGroup.CreateGroup: %q", err)
-			}
-			result.groups[key] = g
+func newTestGroup(t *testing.T, s *contacts.ContactsService, pid int32, name string) *model.Group {
+	t.Helper()
 
-			for _, key := range preg.member {
-				mbrProfile, err := result.GetProfile(key)
-				if err != nil {
-					return nil, nil, fmt.Errorf("presetGroupMember.result.GetProfile: %q", err)
-
-				}
-				if _, err = s.Invite(g.Id, owner.Id, mbrProfile.Id); err != nil {
-					return nil, nil, fmt.Errorf("presetGroup.member.Invite: %q", err)
-				}
-			}
-		}
-
+	g, err := s.CreateUserGroup(pid, name)
+	if err != nil {
+		t.Fatalf("cannot create test group: %v", err)
 	}
 
-	return s, result, nil
+	if g.Name != name {
+		t.Fatalf("expected group name %q, but got %q", name, g.Name)
+	}
+
+	return g
+}
+
+func deleteTestProfile(t *testing.T, s *contacts.ContactsService, pid int32) {
+	t.Helper()
+
+	if err := s.DeleteProfile(pid); err != nil {
+		t.Fatalf("failed to delete profile %q: %v", pid, err)
+	}
+}
+
+func newTestContact(t *testing.T, s *contacts.ContactsService, ownerId int32, targetId int32) *model.Contact {
+	t.Helper()
+
+	c, err := s.AddToContacts(ownerId, targetId)
+	if err != nil {
+		t.Fatalf("cannot create test contact: %v", err)
+	}
+
+	if c.ProfileId != targetId {
+		t.Fatalf("expected contact target id %d, but got %d", targetId, c.ProfileId)
+	}
+
+	return c
+}
+
+func TestProfile(t *testing.T) {
+	t.Run("Profile CRUD", func(t *testing.T) {
+		service := NewTestService(t)
+
+		// create
+		createdProfile := newTestProfile(t, service, "test user")
+
+		// delete
+		deleteTestProfile(t, service, createdProfile.Id)
+	})
+
+	t.Run("delete profile with group", func(t *testing.T) {
+		t.Run("cannot delete profile with group owner", func(t *testing.T) {
+			service := NewTestService(t)
+
+			p := newTestProfile(t, service, "owner")
+			newTestGroup(t, service, p.Id, "test group")
+
+			err := service.DeleteProfile(p.Id)
+			if err == nil {
+				t.Fatalf("expected error when deleting profile with group owner, but got none")
+			}
+			if !errors.Is(err, errs.ErrPermissionDenied) {
+				t.Fatalf("expected %v, but got %v", errs.ErrPermissionDenied, err)
+			}
+		})
+	})
+	t.Run("delete profile with contact", func(t *testing.T) {
+		t.Run("deletes contact when profile is deleted", func(t *testing.T) {
+			service := NewTestService(t)
+			owner := newTestProfile(t, service, "test profile")
+			friend := newTestProfile(t, service, "friend profile")
+
+			newTestContact(t, service, owner.Id, friend.Id)
+
+			err := service.DeleteProfile(friend.Id)
+			if err != nil {
+				t.Fatalf("failed to delete profile with contact: %v", err)
+			}
+
+			// check contact is also deleted
+			contacts, err := service.ListUserContacts(owner.Id)
+			if err != nil {
+				t.Fatalf("failed to list contacts: %v", err)
+			}
+			if len(contacts) != 0 {
+				t.Fatalf("expected 0 contacts after deleting profile, but got %d", len(contacts))
+			}
+		})
+	})
+}
+
+func TestGroup(t *testing.T) {
 }

@@ -23,17 +23,27 @@ type ContactsService struct {
 }
 
 func NewContactsService(opts *Options) (*ContactsService, error) {
+	var (
+		pub       *events.Publisher
+		iconStore *s3.IconStore
+	)
 	contactsStore, err := sqlite3.NewContactsStore(opts.SaveDir, opts.NoSave)
 	if err != nil {
 		return nil, err
 	}
-	pub, err := events.NewPublisher(opts.NatsUrl)
-	if err != nil {
-		return nil, err
+
+	if !opts.NoEvent {
+		pub, err = events.NewPublisher(opts.NatsUrl)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create event publisher: %w", err)
+		}
 	}
-	iconStore, err := s3.NewIconStore(opts.S3Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create s3 icon store: %w", err)
+
+	if !opts.NoIcons {
+		iconStore, err = s3.NewIconStore(opts.S3Endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create s3 icon store: %w", err)
+		}
 	}
 
 	s := ContactsService{
@@ -91,19 +101,21 @@ func (s *ContactsService) CreateUserGroup(userId int32, groupName string) (*mode
 		return nil, err
 	}
 
-	if err = s.pub.Publish(events.GroupCreated{
-		GroupId:   g.Id,
-		GroupName: g.Name,
-		TimeStamp: g.CreatedAt.Unix(),
-	}); err != nil {
-		log.Err(err).Msgf("cannot publish GroupCreated event for group '%d'", g.Id)
-	}
-	if err = s.pub.Publish(events.MemberJoined{
-		GroupId:   g.Id,
-		UserId:    userId,
-		TimeStamp: g.CreatedAt.Unix(),
-	}); err != nil {
-		log.Err(err).Msgf("cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
+	if s.pub != nil {
+		if err = s.pub.Publish(events.GroupCreated{
+			GroupId:   g.Id,
+			GroupName: g.Name,
+			TimeStamp: g.CreatedAt.Unix(),
+		}); err != nil {
+			log.Err(err).Msgf("cannot publish GroupCreated event for group '%d'", g.Id)
+		}
+		if err = s.pub.Publish(events.MemberJoined{
+			GroupId:   g.Id,
+			UserId:    userId,
+			TimeStamp: g.CreatedAt.Unix(),
+		}); err != nil {
+			log.Err(err).Msgf("cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
+		}
 	}
 
 	return g, nil
@@ -330,9 +342,14 @@ func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name 
 	}
 	defer txc.Rollback()
 
-	iconUrl, err := s.genNewIcon(ctx, userId)
-	if err != nil {
-		return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
+	var iconUrl string
+	if s.iconStore != nil {
+		iconUrl, err = s.genNewIcon(ctx, userId)
+		if err != nil {
+			return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
+		}
+	} else {
+		iconUrl = ""
 	}
 
 	profile, err := txc.CreateProfile(userId, name, iconUrl)
@@ -382,22 +399,42 @@ func (s *ContactsService) DeleteProfile(userId int32) error {
 	}
 
 	if err = txc.Commit(); err != nil {
-		return fmt.Errorf("Commit: %w", err)
+		return err
 	}
 
 	return nil
 }
 
 func (s *ContactsService) ListUserContacts(userId int32) ([]model.Contact, error) {
-}
-
-func (s *ContactsService) AddToContacts(userId int32, targetId int32) error {
 	txc, err := s.store.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer txc.Rollback()
 
+	contacts, err := txc.ListUserContacts(userId)
+	if err != nil {
+		return nil, fmt.Errorf("cannot list contacts for user '%d': %w", userId, err)
+	}
+	return contacts, nil
+}
+
+func (s *ContactsService) AddToContacts(ownerId int32, targetId int32) (*model.Contact, error) {
+	txc, err := s.store.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer txc.Rollback()
+
+	// TODO: alias option support
+	contact, err := txc.CreateContact(ownerId, targetId, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot add user '%d' to contacts: %w", targetId, err)
+	}
+	if err = txc.Commit(); err != nil {
+		return nil, fmt.Errorf("cannot commit transaction: %w", err)
+	}
+	return contact, nil
 }
 
 func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) {

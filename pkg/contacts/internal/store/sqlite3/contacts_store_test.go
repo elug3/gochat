@@ -103,6 +103,15 @@ func TestContactCRUD(t *testing.T) {
 
 	// TODO: add update contact
 
+	// list contacts
+	contacts, err := txc.ListUserContacts(user.Id)
+	if err != nil {
+		t.Errorf("failed to list contacts: %v", err)
+	}
+	if len(contacts) != 1 {
+		t.Errorf("expected 1 contact, got %d", len(contacts))
+	}
+
 	// delete contact
 	if err = txc.DeleteUserContact(user.Id, friend.Id); err != nil {
 		t.Errorf("failed to delete contact: %s", err)

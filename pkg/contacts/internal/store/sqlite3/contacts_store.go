@@ -406,7 +406,7 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 		if err != nil {
 			return nil, err
 		}
-		return nil, errs.ErrUserNotExists
+		return nil, fmt.Errorf("owner %d: %w", ownerId, errs.ErrUserNotExists)
 	}
 
 	// target exists
@@ -414,7 +414,7 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 		if err != nil {
 			return nil, err
 		}
-		return nil, errs.ErrUserNotExists
+		return nil, fmt.Errorf("target %d: %w", targetId, errs.ErrUserNotExists)
 	}
 
 	if alias != nil && *alias == "" {

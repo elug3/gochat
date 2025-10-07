@@ -11,7 +11,12 @@ type Options struct {
 
 	// directory where to save the database file
 	SaveDir string
-	NoSave  bool
+	// If true, the database will not be saved to disk
+	NoSave bool
+	// If true, the event will not be published
+	NoEvent bool
+	// If true, the user icons will not be generated
+	NoIcons bool
 
 	NatsUrl string
 
@@ -27,7 +32,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.StringVar(&opts.Post, "post", "8080", "Post number (default: 8080)")
 
 	fs.StringVar(&opts.SaveDir, "d", "./", "Directory where to save the database file")
-	fs.BoolVar(&opts.NoSave, "no-save", false, "Directory where to save the database file")
+	fs.BoolVar(&opts.NoSave, "no-save", false, "If true, the database will not be saved to disk")
+	fs.BoolVar(&opts.NoEvent, "no-event", false, "If true, the event will not be published to NATS")
+	fs.BoolVar(&opts.NoIcons, "no-icons", false, "If true, the user icons will not be generated")
 
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "NATS server URL")
 

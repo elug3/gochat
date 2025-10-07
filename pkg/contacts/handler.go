@@ -257,6 +257,27 @@ func (h *ContactsHandler) HandleListContacts(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, contacts)
 }
 
+func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
+	userId, err := parseUserId(c)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
+		return
+	}
+	var req struct {
+		TargetId int32 `json:"target_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	contact, err := h.contacts.AddToContacts(userId, req.TargetId)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, contact)
+}
+
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/groups", h.HandleListGroups)
@@ -266,18 +287,20 @@ func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/user/:user_id/groups", h.HandleListUserGroup)
 	router.POST("/user/:user_id/groups", h.HandleCreateUserGroup)
-	router.GET("user/:user_id/profile", h.HandleGetProfile)
+	router.GET("/user/:user_id/profile", h.HandleGetProfile)
 
 	router.GET("/user/:user_id/groups/:group_id", h.HandleGetUserGroup)
 	router.GET("/user/:user_id/groups/:group_id/members", h.HandleListGroupMembers)
 	router.POST("/user/:user_id/groups/:group_id/members", h.HandleInviteGroupMember)
 	router.DELETE("/user/:user_id/groups/:group_id/members/:member_id", h.HandleRemoveGroupMember) // TODO: HandleRemoveGroupMember
 
+	router.GET("/user/:user_id/contacts", h.HandleListContacts)
+	router.POST("/user/:user_id/contacts", h.HandleCreateContact)
+
 	router.GET("/profiles", h.HandleListProfiles)
 	router.POST("/profiles", h.HandleCreateProfile)
 	router.DELETE("/profiles/:user_id", h.HandleDeleteProfile)
 
-	router.GET("/contacts", h.HandleListContacts)
 }
 
 func newContactsHandler(contacts *ContactsService) *ContactsHandler {
