@@ -1,5 +1,4 @@
-
-type Chat = {
+export type Chat = {
     id: number;
     name: string;
     lastMessage: string;
@@ -7,12 +6,18 @@ type Chat = {
     unreadCount: number;
 }
 
-type Member = {
+export type Member = {
     userId: string;
     role: "member" | "owner",
 }
 
-type Message = {
+export type Group = {
+    id: number;
+    name: string;
+    createdAt: number;
+}
+
+export type Message = {
     id: number;
     chatId: number;
     sender: number;
@@ -20,7 +25,7 @@ type Message = {
     sentAt: number;
 }
 
-type Profile = {
+export type Profile = {
     userId: string;
     name: string;
     status: "online" | "offline";

@@ -99,6 +99,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		case msg := <-h.registerCh:
 			var user *User
 			var ok bool
+			var isFirst bool
 
 			clientId := h.incClientId()
 			client := &Client{
@@ -111,6 +112,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			if user, ok = h.users[msg.UserId]; !ok {
 				user = &User{Id: msg.UserId, Clients: make(map[int]*Client)}
 				h.users[msg.UserId] = user
+				isFirst = true
+
 			}
 			// add client to user
 			user.Clients[clientId] = client
@@ -126,10 +129,17 @@ func (h *Hub) Run(ctx context.Context) error {
 				}
 			}()
 			log.Info().Msgf("user %d registered with client %d", msg.UserId, clientId)
+			h.eventPub.Publish(&events.WebsocketConnected{
+				UserId:    msg.UserId,
+				TimeStamp: time.Now().Unix(),
+				IsFirst:   isFirst,
+			})
 
 		case msg := <-h.unregisterCh:
 			var user *User
 			var ok bool
+			var isLast bool
+
 			// ignore unregistered user clients
 			if user, ok = h.users[msg.UserId]; ok {
 				if msg.ClientId == 0 {
@@ -148,7 +158,13 @@ func (h *Hub) Run(ctx context.Context) error {
 				}
 				if len(user.Clients) == 0 {
 					delete(h.users, msg.UserId)
+					isLast = true
 				}
+				h.eventPub.Publish(&events.WebsocketDisconnected{
+					UserId:    msg.UserId,
+					TimeStamp: time.Now().Unix(),
+					IsLast:    isLast,
+				})
 			}
 		case msg := <-h.subscribeCh:
 			var (

@@ -118,8 +118,56 @@
             }
         },
 
+        {
+            "endpoint": "/contacts",
+            "@comment": "Get all contacts of the authenticated user",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/user/{JWT.sub}/contacts",
+                    "host": ["contacts:8080"]
+                }
+            ],
+            "extra_config": {
+                
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            }
+        },
+        {
+            "endpoint": "/contacts",
+            "@comment": "Add a new contact to the authenticated user",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/user/{JWT.sub}/contacts",
+                    "host": ["contacts:8080"]
+                }
+            ],
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "operation_debug": true,
+                    "key_identify_strategy": "kid",
+                    "audience": ["api"],
+                    "disable_jwk_security": true,
+                    "jwk_url": "http://auth:8080/.well-known/jwks.json",
+                    "cache": false
+                }
+            }
+        },
 
-        
         {
             "endpoint": "/groups",
             "@comment": "List all groups of the authenticated user",

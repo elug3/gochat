@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Chat, Message, Profile } from "~/model";
 
 type WsState = "connecting" | "open" | "closed" | "idle";
 
@@ -10,6 +11,7 @@ type ChatStore = {
     wsState: WsState;
     setWsState: (state: WsState) => void;
     setChats: (chats: Record<string, Chat>) => void;
+    upsertChat: (chat: Chat) => void;
     setChatsParticipants: (participants: Record<string, Record<string, Profile>>) => void;
     setChatMessages: (chatId: string, messages: Message[]) => void;
     upsertMessage: (message: Message) => void;
@@ -23,6 +25,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     setWsState: (state: WsState) => set({ wsState: state }),
     setChats: (chats: Record<string, Chat>) => set({ chats }),
+    upsertChat: (chat: Chat) => set((state) => ({
+        chats: {
+            ...state.chats,
+            [chat.id]: chat,
+        }
+    })),
     setChatsParticipants: (participants: Record<string, Record<string, Profile>>) => set(() => ({ chatsParticipants: participants })),
 
     setChatMessages: (chatId: string, messages: Message[]) => {

@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, redirect, useLoaderData, type LoaderFunctionArgs
 import { useChatWebSocket } from "~/hooks/useChatWebsocket";
 import { useChatStore } from "~/store/chatStore";
 import { fetchChatList, getWsToken } from "~/utils/auth.server";
+import type { Chat } from "~/model";
 
 export type ChatData = {
   chats: Chat[];
@@ -32,7 +33,11 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <h2 className="">Chats</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="">Chats</h2>
+        <Link to="new" className="">new chat</Link>
+
+      </div>
 
       <nav className="sidebar-container">
         {

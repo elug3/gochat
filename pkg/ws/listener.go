@@ -2,14 +2,15 @@ package ws
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
 )
 
 type EventListener struct {
-	sub *events.Subscriber
-	h   *EventHandler
+	sub     *events.Subscriber
+	handler *EventHandler
 }
 
 func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
@@ -20,26 +21,32 @@ func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
 	}
 
 	return &EventListener{
-		sub: sub,
-		h:   NewEventHandler(hub),
+		sub:     sub,
+		handler: NewEventHandler(hub),
 	}, nil
 }
 
 func (el *EventListener) Run(ctx context.Context) error {
-	el.sub.SubscribeStreams([]string{
-		"CONTACTS",
-		"MESSAGES",
-	}, "WS_SERVER", func(event events.Event) error {
-		switch event := event.(type) {
-		case *events.MessageSent:
-			return el.h.OnMessageSent(event)
-		default:
-			log.Warn().Msgf("unhandled event type: %T", event)
-		}
-		return nil
-	})
+	err := el.sub.SubscribeStream(events.StreamContacts, "WS_SERVER", el.handleEvent)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to contacts stream: %w", err)
+	}
+	if err = el.sub.SubscribeStream(events.StreamMessages, "WS_SERVER", el.handleEvent); err != nil {
+		return fmt.Errorf("failed to subscribe to messages stream: %w", err)
+	}
+
 	defer el.sub.Drain()
 
 	<-ctx.Done()
+	return nil
+}
+
+func (el *EventListener) handleEvent(event events.Event) error {
+	switch event := event.(type) {
+	case *events.MessageSent:
+		return el.handler.OnMessageSent(event)
+	default:
+		log.Warn().Msgf("unhandled event type: %T", event)
+	}
 	return nil
 }

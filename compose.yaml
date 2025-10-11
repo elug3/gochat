@@ -59,13 +59,6 @@ services:
       - contacts
     ports:
       - "12345:12345"
-  bucket:
-    image: minio/minio
-    container_name: minio
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    command: ["server", "/data", "--console-address", ":9001"]
 
   krakend:
     image: krakend:2.10
@@ -80,4 +73,50 @@ services:
   chatview-db:
     image: redis:8.2
     container_name: chatview-db
-  
+
+  bucket:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  presence:
+    build: ./cmd/gochat-presence_server
+    container_name: gochat-presence_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+      - REDIS_URL=presence-db:6379
+    depends_on:
+      - nats-server
+      - presence-db
+  presence-db:
+    image: redis:8.2
+    container_name: presence-db
+
+  mc:
+    image: quay.io/minio/mc:latest
+    container_name: minio_mc
+    depends_on:
+      - bucket
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5 &&
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/profile-icons &&
+      mc anonymous set public local/profile-icons &&
+      tail -f /dev/null
+      "
+
+volumes:
+  minio_data:

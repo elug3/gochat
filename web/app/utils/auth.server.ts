@@ -1,6 +1,7 @@
 import { commitSession, getSession } from "~/session.server";
 import { camelToSnake, keysToCamel } from "./case";
 import { redirect } from "react-router";
+import type { Chat, Member, Message, Profile } from "~/model";
 
 export async function getAccessToken(request: Request) {
     const session = await getSession(request.headers.get("Cookie"));
@@ -147,6 +148,68 @@ export async function sendMessage(request: Request, sendParams: {chatId: number,
     return res.json();
 }
 
+type CreateChatParams = {
+    name?: string | null;
+    participantIds?: Array<string | number>;
+};
+
+export async function createChat(request: Request, params: CreateChatParams): Promise<Chat> {
+    const accessToken = await requireAccessToken(request);
+
+    const participantIds = (params.participantIds ?? [])
+        .map((value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : value))
+        .filter((value) => value !== "" && value !== null && value !== undefined)
+        .map((value) => {
+            if (typeof value === "string" && /^\d+$/.test(value)) {
+                return Number(value);
+            }
+            return value;
+        });
+
+    const payload: Record<string, unknown> = {};
+
+    if (params.name && params.name.trim().length > 0) {
+        payload.name = params.name.trim();
+    }
+
+    if (participantIds.length > 0) {
+        payload.participant_ids = participantIds;
+    }
+
+    const res = await fetch(process.env.API_URL + "/chats", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+        let message = "Failed to create chat";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
+            }
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
+    }
+
+    const data = await res.json();
+    const chat: Chat = {
+        id: data.id,
+        name: data.name ?? "Untitled chat",
+        lastMessage: data.last_message ?? "",
+        lastMessageAt: data.last_message_at ?? Date.now(),
+        unreadCount: data.unread_count ?? 0,
+    };
+
+    return chat;
+}
+
 
 
 function toCamelCase(str: string): string {
@@ -207,5 +270,72 @@ export async function fetchChatList(request: Request): Promise<Chat[]> {
         unreadCount: chat.unread_count || 0,
     }));
 
-    return chats;
+    return chats; 
+}
+
+export async function fetchContacts(request: Request): Promise<Profile[]> {
+    const token = await getAccessToken(request);
+
+    if (!token) {
+        throw new ErrUnauthorized("No access token");
+    }
+    
+    const res = await fetch(process.env.API_URL + "/contacts", {
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (!res.ok) {
+        if (res.status === 401) {
+            throw new ErrUnauthorized("Unauthorized access");
+        }
+        throw new Error("Failed to fetch contacts");
+    }
+    const jsonData = await res.json();
+
+    const contacts: Profile[] = jsonData.map((contact: any) => ({
+        userId: contact.user_id || contact.userId,
+        name: contact.name,
+        status: contact.status || "offline",
+        avatarUrl: contact.avatar_url || contact.avatarUrl,
+    }));
+
+    return contacts;
+}
+
+export async function sendContactRequest(request: Request, identifier: string): Promise<void> {
+    const token = await getAccessToken(request);
+
+    if (!token) {
+        throw new ErrUnauthorized("No access token");
+    }
+
+    const res = await fetch(process.env.API_URL + "/contacts", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ "target_id": Number(identifier) || identifier }),
+    });
+
+    if (!res.ok) {
+        if (res.status === 401) {
+            throw new ErrUnauthorized("Unauthorized access");
+        }
+
+        let message = "Failed to send contact request";
+
+        try {
+            const data = await res.json();
+            if (data?.error) {
+                message = data.error;
+            }
+        } catch {
+            // ignore json parse errors
+        }
+
+        throw new Error(message);
+    }
 }

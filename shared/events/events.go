@@ -20,7 +20,9 @@ const (
 	SubjectMessageSent  = "message.sent"
 	SubjectMessageRead  = "message.read"
 
-	SubjectWebsocketSent = "websocket.sent"
+	SubjectWebsocketSent         = "websocket.sent"
+	SubjectWebsocketConnected    = "websocket.connected"
+	SubjectWebsocketDisconnected = "websocket.disconnected"
 )
 
 const (
@@ -36,6 +38,7 @@ const (
 	StreamContacts  = "CONTACTS"
 	StreamMessages  = "MESSAGES"
 	StreamWebsocket = "WEBSOCKET"
+	StreamPresence  = "PRESENCE"
 )
 
 // UserRegistered is published by AuthService after credentials are created for a user.
@@ -88,6 +91,18 @@ type WebsocketSent struct {
 	TimeStamp int64
 }
 
+type WebsocketConnected struct {
+	UserId    int32
+	TimeStamp int64
+	IsFirst   bool // true if this is the first connection for the user
+}
+
+type WebsocketDisconnected struct {
+	UserId    int32
+	TimeStamp int64
+	IsLast    bool // true if this is the last connection for the user
+}
+
 func (e UserRegistered) Subject() string {
 	return SubjectUserRegistered
 }
@@ -120,17 +135,27 @@ func (e MessageRead) Subject() string {
 	return SubjectMessageRead
 }
 
+func (WebsocketConnected) Subject() string {
+	return SubjectWebsocketConnected
+}
+
+func (WebsocketDisconnected) Subject() string {
+	return SubjectWebsocketDisconnected
+}
+
 type EventFactory func() Event
 
 var subjects = map[string]EventFactory{
-	SubjectUserRegistered: func() Event { return &UserRegistered{} },
-	SubjectGroupCreated:   func() Event { return &GroupCreated{} },
-	SubjectGroupDeleted:   func() Event { return &GroupDeleted{} },
-	SubjectMemberJoined:   func() Event { return &MemberJoined{} },
-	SubjectMemberLeft:     func() Event { return &MemberLeft{} },
-	SubjectMessageSent:    func() Event { return &MessageSent{} },
-	SubjectWebsocketSent:  func() Event { return &WebsocketSent{} },
-	SubjectMessageRead:    func() Event { return &MessageRead{} },
+	SubjectUserRegistered:        func() Event { return &UserRegistered{} },
+	SubjectGroupCreated:          func() Event { return &GroupCreated{} },
+	SubjectGroupDeleted:          func() Event { return &GroupDeleted{} },
+	SubjectMemberJoined:          func() Event { return &MemberJoined{} },
+	SubjectMemberLeft:            func() Event { return &MemberLeft{} },
+	SubjectMessageSent:           func() Event { return &MessageSent{} },
+	SubjectWebsocketSent:         func() Event { return &WebsocketSent{} },
+	SubjectMessageRead:           func() Event { return &MessageRead{} },
+	SubjectWebsocketConnected:    func() Event { return &WebsocketConnected{} },
+	SubjectWebsocketDisconnected: func() Event { return &WebsocketDisconnected{} },
 }
 
 func UnmarshalEvent(subject string, data []byte) (Event, error) {

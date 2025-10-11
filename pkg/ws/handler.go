@@ -3,8 +3,7 @@ package ws
 import "github.com/elug3/gochat/shared/events"
 
 type EventHandler struct {
-	subc *events.Subscriber
-	hub  *Hub
+	hub *Hub
 }
 
 func NewEventHandler(hub *Hub) *EventHandler {
