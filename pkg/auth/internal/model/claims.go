@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/alexedwards/argon2id"
+)
 
 type Token struct {
 	UserId       int32
@@ -10,9 +14,21 @@ type Token struct {
 	TokenType    string
 }
 
-type Credentials struct {
+type User struct {
+	Id       int32
+	Username string
+}
+
+type PasswordCredential struct {
 	UserId       int32
 	Username     string
 	PasswordHash string
-	UpdatedAt    time.Time
+}
+
+func (pw *PasswordCredential) ValidatePassword(password string) (match bool) {
+	match, err := argon2id.ComparePasswordAndHash(password, pw.PasswordHash)
+	if err != nil {
+		panic(err)
+	}
+	return match
 }

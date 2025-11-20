@@ -7,7 +7,8 @@ import (
 
 func NewHttpServer(opts *HttpOptions) (*http.Server, error) {
 	addr := net.JoinHostPort(opts.Host, opts.Port)
-	handler, err := NewHandler(opts)
+	handler, err := NewHttpHandler(opts)
+
 	if err != nil {
 		return nil, err
 	}

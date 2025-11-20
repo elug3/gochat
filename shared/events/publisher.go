@@ -120,9 +120,10 @@ func initConsumers(js nats.JetStreamContext) error {
 			stream:      StreamWebsocket,
 			description: "message service consumes websocket events to send messages",
 			cfg: &nats.ConsumerConfig{
-				Durable:    "WEBSOCKET_MESSAGES",
-				AckPolicy:  nats.AckExplicitPolicy,
-				MaxDeliver: 3,
+				Durable:        "WEBSOCKET_MESSAGES",
+				FilterSubjects: SubjectsWebsocketMessage,
+				AckPolicy:      nats.AckExplicitPolicy,
+				MaxDeliver:     3,
 			},
 		},
 		"CONTACTS_USER_REGISTERED": {

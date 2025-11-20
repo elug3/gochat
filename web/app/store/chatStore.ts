@@ -6,7 +6,7 @@ type WsState = "connecting" | "open" | "closed" | "idle";
 type ChatStore = {
     chats: Record<string, Chat>;
     chatsParticipants: Record<string, Record<string, Profile>>;
-    chatsMessages: Record<string, Message[]>;
+    chatsMessages: Record<string, Record<number, Message>>;
 
     wsState: WsState;
     setWsState: (state: WsState) => void;
@@ -35,10 +35,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     setChatMessages: (chatId: string, messages: Message[]) => {
         const { chatsMessages } = get();
+        const chatKey = String(chatId);
+        const normalizedMessages = messages.reduce<Record<number, Message>>((acc, message) => {
+            acc[message.id] = message;
+            return acc;
+        }, {});
 
         const updatedMessages = {
             ...chatsMessages,
-            [chatId]: messages,
+            [chatKey]: normalizedMessages,
         };
         set({ chatsMessages: updatedMessages });
     },
@@ -46,17 +51,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     upsertMessage: (message: Message) => {
         const { chats, chatsMessages } = get();
 
+        const chatKey = String(message.chatId);
+        const chatMessages = chatsMessages[chatKey] ?? {};
         const updatedMessages = {
             ...chatsMessages,
-            [message.chatId]: [
-                ...(chatsMessages[message.chatId] || []),
-                message,
-            ],
+            [chatKey]: {
+                ...chatMessages,
+                [message.id]: message,
+            },
         };
 
         // update chats
-        const chat = chats[message.chatId];
-        const updatedChats = chat ? {...chats, [chat.id]: {
+        const chat = chats[chatKey];
+        const updatedChats = chat ? {...chats, [chatKey]: {
             ...chat,
             lastMessage: message.content,
             lastMessageAt: message.sentAt,

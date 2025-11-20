@@ -25,6 +25,9 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 
 	r.GET("/ws", h.HandleUseWsToken)
 	r.POST("/ws", h.HandleCreateWsToken)
+
+	r.Any("/webauthn/register/begin", h.HandleWebAuthnRegisterBegin)
+	r.Any("/webauthn/register/finish", h.HandleWebAuthnRegisterFinish)
 }
 
 func Logger() gin.HandlerFunc {
@@ -68,12 +71,11 @@ func (h *AuthHandler) HandleAuthInfo(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, gin.H{
 		"user_id": uid,
 	})
-
 }
 
 func (h *AuthHandler) HandleLogin(c *gin.Context) {
 	username, password, ok := c.Request.BasicAuth()
-	if !ok {
+	if !ok || username == "" || password == "" {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid authorization header"})
 		return
 	}
@@ -149,7 +151,40 @@ func (h *AuthHandler) HandleUseWsToken(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, gin.H{
 		"user_id": userId,
 	})
+}
 
+func (h *AuthHandler) HandleWebAuthnRegisterBegin(c *gin.Context) {
+	accessToken, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	uid, err := h.auth.ValidateAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	creation, err := h.auth.WebauthnRegisterStart(c.Request.Context(), uid)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, creation)
+}
+
+func (h *AuthHandler) HandleWebAuthnRegisterFinish(c *gin.Context) {
+	accessToken, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+	userId, err := h.auth.ValidateAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	h.auth.WebauthnRegisterFinish(c.Request.Context(), userId, c.Request)
 }
 
 func parseUserId(c *gin.Context) (int32, error) {

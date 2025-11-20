@@ -5,11 +5,20 @@ import (
 
 	"github.com/elug3/gochat/pkg/presence/internal/model"
 	"github.com/elug3/gochat/pkg/presence/internal/store"
+	"github.com/elug3/gochat/pkg/presence/internal/store/redisstore"
 	"github.com/elug3/gochat/shared/events"
 )
 
 type EventHandler struct {
 	store store.PresenceStore
+}
+
+func NewEventHandler(opts *EventOptions) (*EventHandler, error) {
+	store, err := redisstore.NewPresenceStore(opts.RedisAddr)
+	if err != nil {
+		return nil, err
+	}
+	return &EventHandler{store: store}, nil
 }
 
 func (h *EventHandler) OnConnected(ev *events.WebsocketConnected) error {

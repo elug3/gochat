@@ -1,16 +1,25 @@
-import type { H } from "node_modules/react-router/dist/development/context-CIdFp11b.mjs";
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { useFetcher, useLoaderData, useParams, type ActionFunctionArgs, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
-import { getChatMessages, sendMessage } from "~/utils/auth.server";
-import type { Member, Message, Profile } from "~/model";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useFetcher, useLoaderData, useNavigate, useOutlet, useParams, type ActionFunctionArgs, type LoaderFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
+import { useUser } from "~/context/user";
+import { getChatMessages, getGroupMembers, sendMessage } from "~/utils/auth.server";
+import type { Member, Message } from "~/model";
+import { useChatStore } from "~/store/chatStore";
 
-export async function loader({ request, params }: LoaderFunctionArgs): Promise<{ messages?: Message[], members?: Member[], error?: string }> {
+type LoaderData = {
+  messages?: Message[];
+  members?: Member[];
+  error?: string;
+};
+
+export async function loader({ request, params }: LoaderFunctionArgs): Promise<LoaderData> {
   const chatId = params.chatId;
   try {
-    const messages = await getChatMessages(request, chatId!);
-    // const members = await getGroupMembers(request, chatId!);
-    return { messages };
-    } catch (err: any) {
+    const [messages, members] = await Promise.all([
+      getChatMessages(request, chatId!),
+      getGroupMembers(request, chatId!)
+    ]);
+    return { messages, members };
+  } catch (err: any) {
     return { error: err.message };
   }
 }
@@ -48,10 +57,10 @@ export function shouldRevalidate({nextUrl}: ShouldRevalidateFunctionArgs) {
   return false;
 }
 
-
 function InputComponent() {
   const fetcher = useFetcher();
   const inputRef = useRef<HTMLInputElement>(null);
+  const isSubmitting = fetcher.state !== "idle";
 
   useEffect(() => {
     if (fetcher.state === "idle") {
@@ -62,19 +71,33 @@ function InputComponent() {
   }, [fetcher.state]);
 
   return (
-    <fetcher.Form method="post" className="flex">
-      <input
-        type="text"
-        name="content"
-        ref={inputRef}
-        placeholder="Type a message..."
-        className=""
-      />
+  <fetcher.Form method="post" className="flex items-center gap-3">
+      <div className="flex-1">
+        <input
+          type="text"
+          name="content"
+          ref={inputRef}
+          placeholder="Message"
+          autoComplete="off"
+          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          disabled={isSubmitting}
+        />
+      </div>
       <button
         type="submit"
-        className="send-button"
+        className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isSubmitting}
       >
-        Send
+        <svg
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 12l14-7-4 7 4 7-14-7z" />
+        </svg>
+        <span>{isSubmitting ? "Sending" : "Send"}</span>
       </button>
     </fetcher.Form>
   );
@@ -82,139 +105,219 @@ function InputComponent() {
 
 type MessageGroup = {
   senderId: number;
-  profile: Profile;
   messages: Message[];
 }
 
-type SpeechBubbleProps = {
-  messageGroup : MessageGroup;
-  currentUserId?: number;
-  handleAvatarClick: (event: ReactMouseEvent<HTMLImageElement>, profile: Profile) => void;
-}
-
-function SpeechBubble({ messageGroup, handleAvatarClick }: SpeechBubbleProps) {
-  return (
-    <div className="speech-bubble">
-      <div className="message-header">
-  <img src="https://picsum.photos/200" alt="Profile" className="message-icon" onClick={(event) => {handleAvatarClick(event, messageGroup.profile)}}/>
-        <div className="message-group">
-          {messageGroup.messages.map((msg) => (
-            <div key={msg.id} className="message-text">{msg.content}</div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ProfileCardProps = {
-    profile: Profile;
-    position?: {x: number, y: number};
-    onClose?: () => void;
-}
-
-function ProfileCard({profile, position, onClose}: ProfileCardProps) {
-  return (
-    <div className="profile-card card" style={{ top: position?.y, left: position?.x }}>
-        <button onClick={onClose}>x</button>
-
-        <div className="profile-content">
-            image here
-
-            <div>
-                <div>{profile.name}</div>
-            </div>
-            <div>
-                <button>Message</button>
-                <button>Add friend</button>
-            </div>
-        </div>
-    </div>
-  );
-}
-
 function groupMessagesBySender(messages: Message[]): MessageGroup[] {
-  const groupedMessages: MessageGroup[] = [];
-  let currentGroup: MessageGroup | null = null;
+  const grouped: MessageGroup[] = [];
+  let current: MessageGroup | null = null;
 
-  messages.forEach((msg) => {
-    // new speech bubble if:
-    // // 1. first message
-    // // 2. different sender
-    if (!currentGroup || currentGroup.senderId !== msg.sender) {
-        currentGroup = { senderId: msg.sender, messages: [msg], profile: {} as Profile };
-        groupedMessages.push(currentGroup);
+  for (const msg of messages) {
+    if (!current || current.senderId !== msg.sender) {
+      current = { senderId: msg.sender, messages: [msg] };
+      grouped.push(current);
     } else {
-        // same sender, add to same speech bubble
-        currentGroup.messages.push(msg);
-    }});
-    // push the last group if not already pushed
-    if (currentGroup && groupedMessages[groupedMessages.length - 1] !== currentGroup) {
-        groupedMessages.push(currentGroup);
+      current.messages.push(msg);
     }
+  }
 
-    return groupedMessages;
+  return grouped;
 }
-
 
 export default function ChatDetail() {
     const { chatId } = useParams();
     const loaderData = useLoaderData<typeof loader>();
+    const navigate = useNavigate();
+  const outlet = useOutlet();
+    const { user } = useUser();
+    const currentUserId = user?.id ?? null;
+    const setChatMessages = useChatStore((s) => s.setChatMessages);
+    const chatMessages = useChatStore((s) => (chatId ? s.chatsMessages[chatId] : undefined));
 
-    const groupedMessages = groupMessagesBySender(loaderData.messages || []);
-    const bottomRef = useRef<HTMLDivElement>(null);
-
-  const [cardProfile, setCardProfile] = useState<Profile | null>(null);
-  const [profilePosition, setProfilePosition] = useState<{x: number, y: number} | null>(null);
-  const handleAvatarClick = (event: ReactMouseEvent<HTMLImageElement>, profile: Profile) => {
-        const rect = (event.target as HTMLElement).getBoundingClientRect();
-        setCardProfile(profile);
-        setProfilePosition({ x: rect.x, y: rect.y });
-    }
+    const loaderMessages = useMemo(() => loaderData.messages ?? [], [loaderData.messages]);
+    const members = loaderData.members ?? [];
+    const [messages, setMessages] = useState<Message[]>(loaderMessages);
 
     useEffect(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "auto"});
+      if (!chatId) return;
+      setChatMessages(chatId, loaderMessages);
+    }, [chatId, loaderMessages, setChatMessages]);
+
+    useEffect(() => {
+      const liveMessages = chatMessages ? Object.values(chatMessages) : loaderMessages;
+      console.log("Live messages updated:", liveMessages);
+      const orderedMessages = [...liveMessages].sort((a, b) => {
+        if (a.sentAt === b.sentAt) {
+          return a.id - b.id;
+        }
+        return a.sentAt - b.sentAt;
+      });
+      setMessages(orderedMessages);
+    }, [chatMessages, loaderMessages]);
+
+    const memberLookup = useMemo(() => {
+      const lookup = new Map<number, Member>();
+      for (const member of members) {
+        const id = Number(member.userId);
+        if (!Number.isNaN(id)) {
+          lookup.set(id, member);
+        }
+      }
+      return lookup;
+    }, [members]);
+
+    const groupedMessages = useMemo(() => groupMessagesBySender(messages), [messages]);
+    const bottomRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      if (chatId) {
+        markAsLoaded(chatId);
+      }
     }, [chatId]);
 
+    useEffect(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    if (outlet) {
+      return outlet;
+    }
+
+    if (loaderData.error) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center dark:bg-slate-950">
+          <div className="rounded-full bg-red-100 p-3 text-red-600 dark:bg-red-900/30 dark:text-red-300">
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-.008 3.6h.016v.2h-.016zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Unable to load chat</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{loaderData.error}</p>
+          </div>
+          <button
+            onClick={() => navigate("/dashboard/chats")}
+            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
+          >
+            Back to chats
+          </button>
+        </div>
+      );
+    }
+
+    const participantLabel = (senderId: number) => {
+      if (currentUserId != null && senderId === currentUserId) {
+        return "You";
+      }
+
+      const member = memberLookup.get(senderId);
+      if (member) {
+        return member.userId.toString();
+      }
+
+      return `User ${senderId}`;
+    };
+
+    const formatTime = (timestamp: number) => {
+      if (!timestamp) return "";
+      return new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(timestamp));
+    };
+
     return (
-    <div className="w-full h-full flex flex-col">
-      {/* Chat header */}
-      <header className="chat-header">
-        <div className="chat-header-left">
-          <button>back</button>
-          <h2 className="chat-name">Chat with {chatId}</h2>
-        </div>
-        <div className="chat-header-right">
-          hello
-        </div>
-      </header>
+      <div className="flex h-full w-full flex-col bg-slate-50/70 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/60 px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900/60">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/dashboard/chats")}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-blue-500 hover:text-blue-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-300"
+              aria-label="Back to chats"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold leading-tight">Chat {chatId}</h2>
+                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  {members.length} participants
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{messages.length} messages</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {chatId && (
+              <Link
+                to={`/dashboard/chats/${chatId}/settings`}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-500 hover:text-blue-600 dark:border-slate-800 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-200"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5 2.254 5 5.033 0 2.171-1.375 4.012-3.3 4.722l-.7 5.545-1.022.7-1.978-1.4-.7-4.845C8.375 12.045 7 10.204 7 8.032 7 5.255 9.245 3 12 3z" />
+                </svg>
+                Settings
+              </Link>
+            )}
+          </div>
+        </header>
 
-      {/* Messages */}
-        <div className="messages-container">
+        <main className="flex-1 overflow-y-auto px-4 py-6">
           {groupedMessages.length === 0 ? (
-            <div>No messages yet. Start the conversation!</div>
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-500 dark:text-slate-400">
+              <div className="rounded-full bg-slate-200/70 p-3 text-slate-500 dark:bg-slate-800/80 dark:text-slate-300">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l-7 2 2-7 9-9a2.828 2.828 0 114 4l-9 9z" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-medium text-slate-600 dark:text-slate-200">No messages yet</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Send the first message to kick things off.</p>
+              </div>
+            </div>
           ) : (
-            groupedMessages.map((group, idx) => (
-              <SpeechBubble key={idx} messageGroup={group} handleAvatarClick={handleAvatarClick} />
-            )
-          ))}
+            <div className="flex flex-col gap-4">
+              {groupedMessages.map((group) => {
+                const isOwn = currentUserId != null && group.senderId === currentUserId;
+                const bubbleAlignment = isOwn ? "items-end" : "items-start";
+                const bubbleClasses = isOwn
+                  ? "bg-blue-600 text-white"
+                  : "bg-white text-slate-900 dark:bg-slate-900/80 dark:text-slate-100";
+                const bubbleMeta = isOwn
+                  ? "text-blue-100"
+                  : "text-slate-400 dark:text-slate-400";
 
-          <div ref={bottomRef}></div>
-        </div>
+                return (
+                  <div key={`${group.senderId}-${group.messages[0]?.id ?? "group"}`} className={`flex w-full flex-col gap-1 ${bubbleAlignment}`}>
+                    <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                      <span>{participantLabel(group.senderId)}</span>
+                    </div>
+                    <div className={`flex flex-col gap-1 rounded-3xl px-4 py-3 shadow-sm ring-1 ring-slate-200/70 dark:ring-slate-800/60 ${bubbleClasses}`}>
+                      {group.messages.map((msg) => (
+                        <p key={msg.id} className="text-sm leading-relaxed">
+                          {msg.content}
+                          {msg.sentAt && (
+                            <span className={`ml-2 align-middle text-[11px] ${bubbleMeta}`}>
+                              {formatTime(msg.sentAt)}
+                            </span>
+                          )}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-        {/* Input */}
-        <div>
+          <div ref={bottomRef} />
+        </main>
+
+        <footer className="border-t border-slate-200/70 bg-white/70 px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900/70">
           <InputComponent />
-        </div>
-
-        {/* Profile card */}
-        {cardProfile && (
-            <ProfileCard
-            profile={cardProfile}
-            position={profilePosition || undefined}
-            onClose={() => setCardProfile(null)}
-            />
-        )}
+        </footer>
       </div>
   );
 }
@@ -300,4 +403,3 @@ export default function ChatDetail() {
 //       </div>
 //   );
 // }
-

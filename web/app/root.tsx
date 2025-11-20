@@ -10,6 +10,7 @@ import {
 import type { Route } from "./+types/root";
 
 import "./app.css";
+import { ThemeProvider } from "~/components/theme";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -33,8 +34,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body>
-        {children}
+    <body className="min-h-screen bg-slate-100 text-slate-900 antialiased transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
         <ScrollRestoration />
         <Scripts />
       </body>
@@ -63,14 +66,16 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
-      <h1>{message}</h1>
-      <p>{details}</p>
-      {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
-          <code>{stack}</code>
-        </pre>
-      )}
+    <main className="pt-16 p-4 container mx-auto bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-2xl font-bold mb-4 text-slate-900 dark:text-slate-100">{message}</h1>
+        <p className="text-slate-600 dark:text-slate-400 mb-4">{details}</p>
+        {stack && (
+          <pre className="w-full p-4 overflow-x-auto bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-lg border border-slate-700">
+            <code className="text-sm">{stack}</code>
+          </pre>
+        )}
+      </div>
     </main>
   );
 }

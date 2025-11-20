@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type PropsWithChildren, type ReactNode } from "react";
+import type { Profile } from "~/model";
 
 interface User {
   id: number;

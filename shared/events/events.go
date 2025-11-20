@@ -33,6 +33,11 @@ const (
 	SubjectAuthAll      = "auth.>"
 )
 
+var (
+	// message service consumes websocket events to send messages
+	SubjectsWebsocketMessage = []string{SubjectWebsocketSent}
+)
+
 const (
 	StreamAuth      = "AUTH"
 	StreamContacts  = "CONTACTS"

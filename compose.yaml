@@ -100,6 +100,15 @@ services:
     depends_on:
       - nats-server
       - presence-db
+  presence-event:
+    build: ./cmd/gochat-presence_event_server
+    container_name: gochat-presence_event_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+      - REDIS_URL=presence-db:6379
+    depends_on:
+      - nats-server
+      - presence-db
   presence-db:
     image: redis:8.2
     container_name: presence-db

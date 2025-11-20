@@ -40,8 +40,8 @@ export default function NewContactRoute() {
 
 	return (
 		<div className="card">
-			<h3 className="text-lg font-semibold mb-2 text-center">Add a new contact</h3>
-			<p className="text-sm text-gray-600 mb-6 text-center">
+			<h3 className="text-lg font-semibold mb-2 text-center text-slate-900 dark:text-slate-100">Add a new contact</h3>
+			<p className="text-sm text-slate-600 dark:text-slate-400 mb-6 text-center">
 				Send a contact request by entering their username or email address.
 			</p>
 
@@ -52,7 +52,7 @@ export default function NewContactRoute() {
 						className="space-y-4"
 					>
 				<div>
-					<label htmlFor="identifier" className="block text-sm font-medium mb-2">
+					<label htmlFor="identifier" className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
 						Username or email
 					</label>
 					<input
@@ -61,20 +61,20 @@ export default function NewContactRoute() {
 						type="text"
 						ref={inputRef}
 						placeholder="jane@example.com"
-						className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
 						disabled={isSubmitting}
 						required
 					/>
 				</div>
 
 				{actionData?.error && (
-					<div className="text-sm text-red-600" role="alert">
+					<div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3" role="alert">
 						{actionData.error}
 					</div>
 				)}
 
 				{actionData?.ok && !actionData.error && (
-					<div className="text-sm text-green-600" role="status">
+					<div className="text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md p-3" role="status">
 						Contact request sent successfully.
 					</div>
 				)}
@@ -82,7 +82,7 @@ export default function NewContactRoute() {
 				<button
 					type="submit"
 					disabled={isSubmitting}
-					className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+					className="w-full bg-blue-500 dark:bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
 				>
 					{isSubmitting ? "Sending..." : "Send Request"}
 				</button>

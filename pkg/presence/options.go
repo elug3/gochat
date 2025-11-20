@@ -13,7 +13,8 @@ type HttpOptions struct {
 }
 
 type EventOptions struct {
-	NatsUrl string
+	NatsUrl   string
+	RedisAddr string
 }
 
 func ConfigureHttpOptions(fs *flag.FlagSet, args []string) (*HttpOptions, error) {
@@ -43,6 +44,7 @@ func ConfigureEventOptions(fs *flag.FlagSet, args []string) (*EventOptions, erro
 	var opts EventOptions
 
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "NATS server URL")
+	fs.StringVar(&opts.RedisAddr, "redis-url", "", "redis address for presence store")
 
 	err := fs.Parse(args)
 	if err != nil {
@@ -54,6 +56,13 @@ func ConfigureEventOptions(fs *flag.FlagSet, args []string) (*EventOptions, erro
 			opts.NatsUrl = natsUrl
 		} else {
 			return nil, fmt.Errorf("NATS URL must be provided via --nats-url flag or NATS_URL environment variable")
+		}
+	}
+	if opts.RedisAddr == "" {
+		if redisAddr, exists := os.LookupEnv("REDIS_URL"); exists {
+			opts.RedisAddr = redisAddr
+		} else {
+			return nil, fmt.Errorf("redis address must be provided via --redis-url flag or REDIS_URL environment variable")
 		}
 	}
 

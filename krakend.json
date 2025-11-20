@@ -2,6 +2,20 @@
     "$schema": "https://www.krakend.io/schema/v2.10/krakend.json",
     "version": 3,
     "debug_endpoint": true,
+    "extra_config": {
+        "security/cors": {
+            "allow_methods": [
+                "POST",
+                "GET",
+                "OPTIONS"
+            ],
+            "allow_origins": ["*"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "allow_credentials": true,
+            "debug": true
+        }
+    },
     "endpoints": [
         {
             "endpoint": "/me",
@@ -37,6 +51,61 @@
                 {
                     "method": "POST",
                     "url_pattern": "/login",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/webauthn/register/start",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "GET",
+                    "url_pattern": "/webauthn/register/start",
+                    "host": ["auth:8080"]
+                }
+            ],
+            "extra_config": {
+                "security/cors": {
+                    "options_passthrough": true,
+                    "allow_methods": ["GET", "OPTIONS"],
+                    "options_success_status": 204
+                }
+            }
+        },
+        {
+            "endpoint": "/webauthn/register/finish",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/webauthn/register/finish",
+                    "host": ["auth:8080"]
+                }
+            ]
+        }, 
+        {
+            "endpoint": "/webauthn/login/start",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/webauthn/login/start",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/webauthn/login/finish",
+            "method": "POST",
+            "output_encoding": "no-op",
+            "backend": [
+                {
+                    "method": "POST",
+                    "url_pattern": "/webauthn/login/finish",
                     "host": ["auth:8080"]
                 }
             ]
@@ -88,7 +157,6 @@
                     "method": "GET",
                     "url_pattern": "/user",
                     "host": ["user:8080"]
-
                 }
             ]
         },
@@ -97,12 +165,20 @@
             "endpoint": "/profile",
             "@comment": "Get the profile of the authenticated user",
             "method": "GET",
-            "output_encoding": "no-op",
             "backend": [
                 {
                     "method": "GET",
                     "url_pattern": "/user/{JWT.sub}/profile",
                     "host": ["contacts:8080"]
+                },
+                {
+                    "method": "GET",
+                    "url_pattern": "/users/{JWT.sub}/presence",
+                    "host": ["presence:8080"],
+                    "encoding": "json",
+                    "mapping": {
+                        "user_id": "id"
+                    }
                 }
             ],
             "extra_config": {

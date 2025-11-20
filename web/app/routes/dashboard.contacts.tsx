@@ -24,7 +24,7 @@ export function ContactsList({ contacts }: ContactsListProps) {
     return (
         <div className="sidebar-container">
             {contacts.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">
+                <div className="text-center text-slate-500 dark:text-slate-400 py-8">
                     <p>No contacts found.</p>
                     <p className="text-sm mt-2">Add friends to start chatting!</p>
                 </div>
@@ -36,7 +36,7 @@ export function ContactsList({ contacts }: ContactsListProps) {
                     >
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                             {/* Avatar placeholder */}
-                            <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
+                            <div className="w-8 h-8 rounded-full bg-slate-300 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center">
                                 {contact.avatarUrl ? (
                                     <img
                                         src={contact.avatarUrl}
@@ -44,7 +44,7 @@ export function ContactsList({ contacts }: ContactsListProps) {
                                         className="w-8 h-8 rounded-full object-cover"
                                     />
                                 ) : (
-                                    <span className="text-sm font-medium text-gray-600">
+                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
                                         {contact.name.charAt(0).toUpperCase()}
                                     </span>
                                 )}
@@ -59,12 +59,12 @@ export function ContactsList({ contacts }: ContactsListProps) {
                                     <span
                                         className={`w-2 h-2 rounded-full flex-shrink-0 ${
                                             contact.status === "online" 
-                                                ? "bg-green-500" 
-                                                : "bg-gray-400"
+                                                ? "bg-green-500 dark:bg-green-400" 
+                                                : "bg-slate-400 dark:bg-slate-500"
                                         }`}
                                     />
                                 </div>
-                                <div className="text-xs text-gray-500 capitalize">
+                                <div className="text-xs text-slate-500 dark:text-slate-400 capitalize">
                                     {contact.status}
                                 </div>
                             </div>
@@ -73,7 +73,7 @@ export function ContactsList({ contacts }: ContactsListProps) {
                         {/* Options button */}
                         <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
-                                className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700"
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
                                 onClick={(e) => {
                                     e.preventDefault();
                                     // TODO: Show options menu
@@ -125,17 +125,17 @@ export default function Contacts() {
         <div className="page">
             <main className="flex-1 flex items-center justify-center">
                 <div className="w-full max-w-2xl">
-                    <h2 className="text-center mb-6 text-lg font-semibold">Contacts</h2>
+                    <h2 className="text-center mb-6 text-lg font-semibold text-slate-900 dark:text-slate-100">Contacts</h2>
 
-                    <div className="flex border-b border-gray-200">
+                    <div className="flex border-b border-slate-200 dark:border-slate-800">
                         <NavLink
                             to="."
                             end
                             className={({ isActive }) =>
                                 `flex-1 py-2 px-4 text-sm font-medium text-center border-b-2 transition-colors ${
                                     isActive
-                                        ? "border-blue-500 text-blue-600"
-                                        : "border-transparent text-gray-500 hover:text-gray-700"
+                                        ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400"
+                                        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                                 }`
                             }
                         >
@@ -146,8 +146,8 @@ export default function Contacts() {
                             className={({ isActive }) =>
                                 `flex-1 py-2 px-4 text-sm font-medium text-center border-b-2 transition-colors ${
                                     isActive
-                                        ? "border-blue-500 text-blue-600"
-                                        : "border-transparent text-gray-500 hover:text-gray-700"
+                                        ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400"
+                                        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                                 }`
                             }
                         >

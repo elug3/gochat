@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"database/sql"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -16,20 +18,26 @@ import (
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
 	"github.com/elug3/gochat/shared/events"
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/patrickmn/go-cache"
 
 	"github.com/elug3/gochat/pkg/auth/internal/model"
-	"github.com/elug3/gochat/pkg/auth/internal/store"
 	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
 )
 
 type AuthService struct {
-	store    store.AuthStore
+	store *sqlite3.AuthStore
+	db    *sql.DB
+
 	jwtKey   *rsa.PrivateKey
 	jwks     *jwk.Jwks
 	wsTokens *cache.Cache
+
+	wAuth *webauthn.WebAuthn
+
 	eventPub *events.Publisher
 }
 
@@ -47,14 +55,18 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	if !ok {
 		return nil, errors.New("not an RSA private key")
 	}
+
 	return rsaKey, nil
 }
 
 func NewAuthService(opts *Options) (*AuthService, error) {
-	// load private key
-	var jwtKey *rsa.PrivateKey
-	var err error
+	var (
+		jwtKey   *rsa.PrivateKey
+		eventPub *events.Publisher
+		err      error
+	)
 
+	// load private key
 	if opts.UseTmpKey {
 		log.Warn().Msg("using temporary RSA key, not recommended for production")
 		jwtKey, err = rsa.GenerateKey(rand.Reader, 2048)
@@ -66,29 +78,43 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 	}
 
 	// nats
-	eventPub, err := events.NewPublisher(opts.NatsUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS server: %w", err)
+	if !opts.NoEvents {
+		eventPub, err = events.NewPublisher(opts.NatsUrl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to NATS server: %w", err)
+		}
 	}
 
-	// create JWKs
+	// jwk
 	jwks := jwk.NewJwks()
 	err = jwks.AddKey(jwtKey.PublicKey, "key1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to add key to JWKs: %w", err)
 	}
 
-	// initialize store
+	// store
 	store, err := sqlite3.NewAuthStore(opts.SaveDir, opts.InMemory)
 	if err != nil {
 		return nil, err
 	}
+
+	wAuth, err := webauthn.New(&webauthn.Config{
+		RPDisplayName: "GoChat",                     // Display Name for your site
+		RPID:          "localhost",                  // Generally the domain name for your site
+		RPOrigins:     []string{"http://localhost"}, // The origin URL for WebAuthn requests
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create webauthn instance: %w", err)
+	}
+
 	return &AuthService{
 		store:    store,
+		db:       store.DB(),
 		jwtKey:   jwtKey,
 		jwks:     jwks,
 		wsTokens: cache.New(5*time.Minute, 10*time.Minute),
 		eventPub: eventPub,
+		wAuth:    wAuth,
 	}, nil
 }
 
@@ -102,73 +128,169 @@ func credentialsRule(username, password string) error {
 	return nil
 }
 
-func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (int32, error) {
-	err := credentialsRule(username, password)
+func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (*model.User, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return 0, fmt.Errorf("%w: %w", errs.ErrConstraint, err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err = credentialsRule(username, password); err != nil {
+		return nil, fmt.Errorf("%w: %w", errs.ErrConstraint, err)
 	}
 	passwordHash, err := newHash(password)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	userId, err := s.store.CreateCredential(ctx, username, passwordHash)
+	u, err := s.store.CreateUser(ctx, tx, username)
 	if err != nil {
-		return 0, fmt.Errorf("cannot create user '%s': %w", username, err)
+		return nil, fmt.Errorf("failed to create user: %s: %w", username, err)
 	}
 
-	if name == "" {
-		name = username
+	if err = s.store.SetPasswordHash(ctx, tx, u.Id, passwordHash); err != nil {
+		return nil, fmt.Errorf("failed to set password: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	s.eventPub.Publish(events.UserRegistered{
-		UserId:    userId,
-		Username:  name,
-		Timestamp: time.Now().Unix(),
-	})
+	if s.eventPub != nil {
+		if err = s.eventPub.Publish(events.UserRegistered{
+			UserId:    u.Id,
+			Username:  name,
+			Timestamp: time.Now().Unix(),
+		}); err != nil {
+			log.Err(err).Msg("failed to publish user registered event")
+		}
+	}
 
-	return userId, nil
+	return u, nil
 }
 
-func (s *AuthService) UpdatePassword(ctx context.Context, userId int32, password string) error {
+func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
 	passwordHash, err := newHash(password)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create hash password: %w", err)
 	}
-	if err = s.store.UpdatePassword(ctx, userId, passwordHash); err != nil {
-		return err
+	if err = s.store.SetPasswordHash(ctx, tx, uid, passwordHash); err != nil {
+		return fmt.Errorf("failed to set password: %w", err)
 	}
+
+	// TODO: publish event
+
 	return nil
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (*model.Token, error) {
-	c, err := s.store.GetCredential(ctx, username)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			return nil, errs.ErrAuthenticationFailure
-		}
-		return nil, err
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	if match, err := argon2id.ComparePasswordAndHash(password, c.PasswordHash); !match {
-		if err != nil {
-			return nil, err
-		}
+
+	pw, err := s.store.GetPasswordByUsername(ctx, tx, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get password hash: %w", err)
+	}
+
+	if match := pw.ValidatePassword(password); !match {
 		return nil, errs.ErrAuthenticationFailure
 	}
-	// if authentication success
+
+	// authentication success
 	expiresIn := time.Hour * 24 * 7
-	accessToken, err := s.newClaims(c.UserId, expiresIn) // 7 days
+	token, err := newToken(pw.UserId, s.jwtKey, expiresIn) // 7 days
 	if err != nil {
 		return nil, err
 	}
-	return &model.Token{
-		UserId:       c.UserId,
-		AccessToken:  accessToken,
-		RefreshToken: "", // TODO
-		ExpiresIn:    expiresIn,
-	}, nil
+
+	// TODO: publish event
+
+	return token, nil
 }
 
+func (s *AuthService) WebauthnRegisterStart(ctx context.Context, userId int32) (*protocol.CredentialCreation, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	u, err := s.store.LoadWebAuthnUser(ctx, tx, userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load webauthn user: %w", err)
+	}
+
+	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationDefault,
+		webauthn.WithExclusions(webauthn.Credentials(u.WebAuthnCredentials()).CredentialDescriptors()),
+		webauthn.WithExtensions(map[string]any{"creProps": true}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin registration: %w", err)
+	}
+
+	if err = s.store.SaveSessionData(ctx, tx, session); err != nil {
+		return nil, fmt.Errorf("cannot save session data: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return creation, nil
+}
+
+func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, r *http.Request) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	u, err := s.store.LoadWebAuthnUser(ctx, tx, userId)
+	if err != nil {
+		return fmt.Errorf("failed to load webauthn user: %w", err)
+	}
+	session, err := s.store.GetSessionData(ctx, tx, r.FormValue("challenge"))
+	if err != nil {
+		return fmt.Errorf("failed to get session data: %w", err)
+	}
+
+	credential, err := s.wAuth.FinishRegistration(u, *session, r)
+	if err != nil {
+		return fmt.Errorf("failed to finish credential registration: %w", err)
+	}
+
+	if err := s.store.SaveWebAuthnCredential(ctx, tx, userId, credential); err != nil {
+		return fmt.Errorf("cannot save webauthn credential: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// func (s *AuthService) GetUserByAccessToken(ctx context.Context, accessToken string) (*model.User, error) {
+// 	tx, err := s.db.BeginTx(ctx, nil)
+// 	uid, err := s.ValidateAccessToken(ctx, accessToken)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	u, err := s.store.GetUserById(ctx, tx, uid)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return u, nil
+// }
+
+// TODO: implement refresh token
 func Refresh(ctx context.Context, refreshToken string) (newAccessToken, newRefreshToken string, err error) {
 	return "", "", nil
 }
@@ -243,7 +365,20 @@ func (s *AuthService) Close() error {
 	return s.store.Close()
 }
 
-func (s *AuthService) newClaims(userId int32, expiresIn time.Duration) (accessToken string, err error) {
+func newToken(userId int32, jwtKey *rsa.PrivateKey, expiresIn time.Duration) (*model.Token, error) {
+	accessToken, err := newClaims(userId, jwtKey, expiresIn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create access token: %w", err)
+	}
+	return &model.Token{
+		UserId:       userId,
+		AccessToken:  accessToken,
+		RefreshToken: "", // TODO
+		ExpiresIn:    expiresIn,
+	}, nil
+}
+
+func newClaims(userId int32, jwtKey *rsa.PrivateKey, expiresIn time.Duration) (accessToken string, err error) {
 	issudAt := time.Now()
 	expiresAt := issudAt.Add(expiresIn)
 
@@ -255,7 +390,7 @@ func (s *AuthService) newClaims(userId int32, expiresIn time.Duration) (accessTo
 	})
 	claims.Header["kid"] = "key1"
 
-	accessToken, err = claims.SignedString(s.jwtKey)
+	accessToken, err = claims.SignedString(jwtKey)
 	if err != nil {
 		return "", err
 	}

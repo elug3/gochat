@@ -3,12 +3,14 @@ package sqlite3
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/model"
-	"github.com/mattn/go-sqlite3"
+	"github.com/go-webauthn/webauthn/webauthn"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type AuthStore struct {
@@ -28,110 +30,208 @@ func NewAuthStore(saveDir string, inMemory bool) (*AuthStore, error) {
 		return nil, err
 	}
 
-	if err = initdb(db); err != nil {
-		db.Close()
-		return nil, err
+	ctx := context.Background()
+	if err = initdb(ctx, db); err != nil {
+		return nil, fmt.Errorf("cannot initialize database: %w", err)
 	}
 
 	return &AuthStore{db: db}, nil
 }
 
-func (store *AuthStore) GetCredential(ctx context.Context, username string) (*model.Credentials, error) {
-	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{
-		ReadOnly: true,
-	})
-	if err != nil {
-		return nil, err
+func (store *AuthStore) DB() *sql.DB {
+	if store.db == nil {
+		panic("database not initialized")
 	}
-	var c model.Credentials
-	err = tx.QueryRow(`
-	SELECT user_id, username, password_hash, updated_at
-	FROM credentials
-	WHERE username = ?;`, username).Scan(&c.UserId, &c.Username, &c.PasswordHash, &c.UpdatedAt)
+	return store.db
+}
+
+func (store *AuthStore) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*model.User, error) {
+	result, err := tx.QueryContext(ctx, `
+	INSERT INTO users (username)
+	VALUES (?)
+	RETURNING id, username;
+	`, username)
+	if err != nil {
+		return nil, fmt.Errorf("cannot insert user: %w", err)
+	}
+	defer result.Close()
+
+	var u model.User
+	if result.Next() {
+		if err := result.Scan(&u.Id, &u.Username); err != nil {
+			return nil, fmt.Errorf("cannot scan inserted user: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("no user returned after insert")
+	}
+
+	return &u, nil
+}
+
+func (store *AuthStore) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (*model.User, error) {
+	var u model.User
+	err := tx.QueryRowContext(ctx, `
+	SELECT id, username
+	FROM users
+	WHERE id = ?;`, userId).Scan(&u.Id, &u.Username)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errs.ErrNotFound
 		}
+	}
+	return &u, nil
+}
+
+func (store *AuthStore) SetPasswordHash(ctx context.Context, tx *sql.Tx, userId int32, passwordHash string) error {
+	_, err := tx.ExecContext(ctx, `
+	INSERT INTO passwords (user_id, password_hash)
+	VALUES (?, ?)
+	ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash, updated_at=CURRENT_TIMESTAMP;
+	`, userId, passwordHash)
+	if err != nil {
+		return fmt.Errorf("cannot update password hash: %w", err)
+	}
+
+	return nil
+}
+
+func (store *AuthStore) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, username string) (*model.PasswordCredential, error) {
+	var pw model.PasswordCredential
+	err := tx.QueryRowContext(ctx, `
+	SELECT p.user_id, u.username, p.password_hash
+	FROM passwords as p
+	JOIN users as u ON u.id = p.user_id
+	WHERE u.username = ?;`, username).Scan(&pw.UserId, &pw.Username, &pw.PasswordHash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errs.ErrNotFound
+		}
+		return nil, fmt.Errorf("cannot get password: %w", err)
+	}
+	return &pw, nil
+}
+
+func (store *AuthStore) SaveSessionData(ctx context.Context, tx *sql.Tx, session *webauthn.SessionData) error {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("cannot marshal session data: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+	INSERT INTO webauthn_sessions (challenge, user_id, session_data)
+	VALUES (?, ?, ?);
+	`, session.Challenge, session.UserID, data)
+	if err != nil {
+		return fmt.Errorf("cannot insert session data: %w", err)
+	}
+
+	return nil
+}
+
+func (store *AuthStore) GetSessionData(ctx context.Context, tx *sql.Tx, challenge string) (*webauthn.SessionData, error) {
+	row := tx.QueryRowContext(ctx, `
+	SELECT session_data
+	FROM webauthn_sessions
+	WHERE challenge = ?;
+	`, challenge)
+
+	var data []byte
+	if err := row.Scan(&data); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cannot scan session data: %w", err)
+	}
+
+	var session webauthn.SessionData
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal session data: %w", err)
+	}
+
+	return &session, nil
+}
+
+func (store *AuthStore) LoadWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
+	u, err := store.GetUserById(ctx, tx, userId)
+	if err != nil {
 		return nil, err
 	}
-	return &c, nil
+
+	credentials, err := store.GetWebAuthnCredentials(ctx, tx, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.WebAuthnUser{
+		Id:          []byte(fmt.Sprintf("%d", u.Id)),
+		Name:        u.Username,
+		DisplayName: u.Username,
+		Icon:        "",
+		Credentials: credentials,
+	}, nil
+
 }
 
-func (store *AuthStore) CreateCredential(ctx context.Context, username string, passwordHash string) (int32, error) {
-	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
+func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
+	data, err := json.Marshal(credential)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("cannot marshal credential data: %w", err)
 	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`
-	INSERT INTO credentials (username, password_hash)
+
+	_, err = tx.ExecContext(ctx, `
+	INSERT INTO webauthn_credentials (user_id, credential_data)
 	VALUES (?, ?);
-	`, username, passwordHash)
-
+	`, userId, data)
 	if err != nil {
-		var sqliteErr sqlite3.Error
-		if errors.As(err, &sqliteErr) {
-			if sqliteErr.Code == sqlite3.ErrConstraint {
-				return 0, errs.ErrExists
-			}
-			return 0, err
-		}
+		return fmt.Errorf("cannot insert credential data: %w", err)
 	}
 
-	userId, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-	if err = tx.Commit(); err != nil {
-		return 0, err
-	}
-
-	return int32(userId), nil
+	return nil
 }
 
-func (store *AuthStore) SaveCredentials(ctx context.Context, userId int32, username string, passwordHash string) error {
-	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.Exec(`
-	INSERT INTO credentials (user_id, username, password_hash)
-	VALUES (?, ?, ?);
-	`, userId, username, passwordHash)
-
-	if err != nil {
-		var sqliteErr sqlite3.Error
-		if errors.As(err, &sqliteErr) {
-			if sqliteErr.Code == sqlite3.ErrConstraint {
-				return errs.ErrExists
-			}
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-func (store *AuthStore) UpdatePassword(ctx context.Context, userId int32, newPasswordHash string) error {
-	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.Exec(`
-	UPDATE credentials
-	SET password_hash = ? 
+func (store *AuthStore) GetWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) ([]webauthn.Credential, error) {
+	rows, err := tx.QueryContext(ctx, `
+	SELECT credential_data
+	FROM webauthn_credentials
 	WHERE user_id = ?;
-	`, newPasswordHash, userId)
+	`, userId)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errs.ErrNotFound
+		return nil, fmt.Errorf("cannot query credential data: %w", err)
+	}
+	defer rows.Close()
+
+	var credentials []webauthn.Credential
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("cannot scan credential data: %w", err)
 		}
-		return err
+
+		var credential webauthn.Credential
+		if err := json.Unmarshal(data, &credential); err != nil {
+			return nil, fmt.Errorf("cannot unmarshal credential data: %w", err)
+		}
+
+		credentials = append(credentials, credential)
 	}
 
-	return tx.Commit()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over credential rows: %w", err)
+	}
+
+	return credentials, nil
+}
+
+func (store *AuthStore) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) error {
+	_, err := tx.ExecContext(ctx, `
+	DELETE FROM webauthn_credentials
+	WHERE user_id = ?;
+	`, userId)
+	if err != nil {
+		return fmt.Errorf("cannot delete credential data: %w", err)
+	}
+
+	return nil
 }
 
 func (store *AuthStore) Close() error {
@@ -141,53 +241,82 @@ func (store *AuthStore) Close() error {
 	return nil
 }
 
-func initdb(db *sql.DB) error {
-	var errs []error
-	_, err := db.Exec(`
-	CREATE TABLE IF NOT EXISTS credentials (
-	user_id INTEGER PRIMARY KEY,
-	username TEXT UNIQUE NOT NULL,
-	password_hash TEXT NOT NULL,
-	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+func initdb(ctx context.Context, db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("cannot begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := initUserTable(ctx, tx); err != nil {
+		return err
+	}
+	if err := initPasswordTable(ctx, tx); err != nil {
+		return err
+	}
+	if err := initWebAuthnTable(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("cannot commit transaction: %w", err)
+	}
+	return nil
+}
+
+func initUserTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	`)
+	if err != nil {
+		return fmt.Errorf("cannot create users table: %w", err)
+	}
+	return nil
+}
+
+func initPasswordTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE IF NOT EXISTS passwords (
+		user_id INTEGER PRIMARY KEY,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+	`)
+	if err != nil {
+		return fmt.Errorf("cannot create passwords table: %w", err)
+	}
+	return nil
+}
+
+func initWebAuthnTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE IF NOT EXISTS webauthn_sessions (
+		challenge TEXT PRIMARY KEY,
+		user_id INTEGER NOT NULL,
+		session_data BLOB NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	);`)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot create table credentials: %w", err))
+		return fmt.Errorf("cannot create webauthn table: %w", err)
 	}
-
-	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS refresh_tokens (
-	token_id    UUID PRIMARY KEY,
-	user_id     UUID NOT NULL REFERENCES credentials(user_id) ON DELETE CASCADE,
-	token       VARCHAR(512) NOT NULL,
-	expires_at  TIMESTAMP NOT NULL,
-	created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	revoked     BOOLEAN NOT NULL DEFAULT FALSE
+	_, err = tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS webauthn_credentials (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		credential_data BLOB NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot create table refresh_tokens: %w", err))
+		return fmt.Errorf("cannot create webauthn credentials table: %w", err)
 	}
 
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot create index idx_refresh_tokens_user: %w", err))
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot create index idx_refresh_tokens_token: %w", err))
-	}
-
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS signing_keys (
-	key_id     UUID PRIMARY KEY,
-	public_key TEXT NOT NULL,
-	private_key TEXT NOT NULL,
-	algorithm  VARCHAR(50) NOT NULL,
-	active     BOOLEAN NOT NULL DEFAULT TRUE,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot create table signing_keys: %w", err))
-	}
-
-	return errors.Join(errs...)
+	return nil
 }

@@ -1,7 +1,7 @@
 import { commitSession, getSession } from "~/session.server";
 import { camelToSnake, keysToCamel } from "./case";
 import { redirect } from "react-router";
-import type { Chat, Member, Message, Profile } from "~/model";
+import type { Chat, Group, Member, Message, Profile } from "~/model";
 
 export async function getAccessToken(request: Request) {
     const session = await getSession(request.headers.get("Cookie"));
@@ -153,28 +153,108 @@ type CreateChatParams = {
     participantIds?: Array<string | number>;
 };
 
-export async function createChat(request: Request, params: CreateChatParams): Promise<Chat> {
-    const accessToken = await requireAccessToken(request);
+// export async function createChat(request: Request, params: CreateChatParams): Promise<Chat> {
+//     const accessToken = await requireAccessToken(request);
 
-    const participantIds = (params.participantIds ?? [])
-        .map((value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : value))
-        .filter((value) => value !== "" && value !== null && value !== undefined)
-        .map((value) => {
-            if (typeof value === "string" && /^\d+$/.test(value)) {
-                return Number(value);
+//     const participantIds = (params.participantIds ?? [])
+//         .map((value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : value))
+//         .filter((value) => value !== "" && value !== null && value !== undefined)
+//         .map((value) => {
+//             if (typeof value === "string" && /^\d+$/.test(value)) {
+//                 return Number(value);
+//             }
+//             return value;
+//         });
+
+//     const payload: Record<string, unknown> = {};
+
+//     if (params.name && params.name.trim().length > 0) {
+//         payload.name = params.name.trim();
+//     }
+
+//     if (participantIds.length > 0) {
+//         payload.participant_ids = participantIds;
+//     }
+
+//     const res = await fetch(process.env.API_URL + "/chats", {
+//         method: "POST",
+//         headers: {
+//             "Content-Type": "application/json",
+//             Authorization: `Bearer ${accessToken}`,
+//         },
+//         body: JSON.stringify(payload),
+//     });
+
+//     if (!res.ok) {
+//         let message = "Failed to create chat";
+//         try {
+//             const data = await res.json();
+//             if (typeof data?.error === "string" && data.error.trim().length > 0) {
+//                 message = data.error;
+//             }
+//         } catch {
+//             // ignore parse errors
+//         }
+//         throw new Error(message);
+//     }
+
+//     const data = await res.json();
+//     const chat: Chat = {
+//         id: data.id,
+//         name: data.name ?? "Untitled chat",
+//         lastMessage: data.last_message ?? "",
+//         lastMessageAt: data.last_message_at ?? Date.now(),
+//         unreadCount: data.unread_count ?? 0,
+//     };
+
+//     return chat;
+// }
+
+type CreateGroupParams = {
+    name: string;
+}
+
+export async function createGroup(request: Request, params: CreateGroupParams): Promise<Group> {
+    const accessToken = await requireAccessToken(request)
+
+    const res = await fetch(process.env.API_URL + "/groups", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ name: params.name }),
+    });
+
+    if (!res.ok) {
+        let message = "Failed to create group";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
             }
-            return value;
-        });
-
-    const payload: Record<string, unknown> = {};
-
-    if (params.name && params.name.trim().length > 0) {
-        payload.name = params.name.trim();
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
     }
 
-    if (participantIds.length > 0) {
-        payload.participant_ids = participantIds;
-    }
+    const data = await res.json();
+    const group: Group = {
+        id: data.id,
+        name: data.name ?? "Untitled group",
+        createdAt: data.created_at,
+    };
+
+    return group;
+}
+
+type CreateDirectChatParams = {
+    contactId: string;
+}
+
+export async function createDirectChat(request: Request, params: CreateDirectChatParams): Promise<Chat> {
+    const accessToken = await requireAccessToken(request);
 
     const res = await fetch(process.env.API_URL + "/chats", {
         method: "POST",
@@ -182,11 +262,14 @@ export async function createChat(request: Request, params: CreateChatParams): Pr
             "Content-Type": "application/json",
             Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ 
+            participant_ids: [params.contactId],
+            type: "direct"
+        }),
     });
 
     if (!res.ok) {
-        let message = "Failed to create chat";
+        let message = "Failed to create direct chat";
         try {
             const data = await res.json();
             if (typeof data?.error === "string" && data.error.trim().length > 0) {
@@ -201,7 +284,7 @@ export async function createChat(request: Request, params: CreateChatParams): Pr
     const data = await res.json();
     const chat: Chat = {
         id: data.id,
-        name: data.name ?? "Untitled chat",
+        name: data.name ?? "Direct Chat",
         lastMessage: data.last_message ?? "",
         lastMessageAt: data.last_message_at ?? Date.now(),
         unreadCount: data.unread_count ?? 0,
@@ -210,6 +293,124 @@ export async function createChat(request: Request, params: CreateChatParams): Pr
     return chat;
 }
 
+export async function updateChatName(request: Request, chatId: string, name: string): Promise<Chat> {
+    const accessToken = await requireAccessToken(request);
+
+    const res = await fetch(process.env.API_URL + `/chats/${chatId}`, {
+        method: "PATCH",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ name }),
+    });
+
+    if (!res.ok) {
+        let message = "Failed to update chat name";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
+            }
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
+    }
+
+    const data = await res.json();
+    const chat: Chat = {
+        id: data.id,
+        name: data.name ?? name,
+        lastMessage: data.last_message ?? "",
+        lastMessageAt: data.last_message_at ?? Date.now(),
+        unreadCount: data.unread_count ?? 0,
+    };
+
+    return chat;
+}
+
+export async function addChatParticipant(request: Request, chatId: string, participantId: string): Promise<Member> {
+    const accessToken = await requireAccessToken(request);
+
+    const res = await fetch(process.env.API_URL + `/chats/${chatId}/participants`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ participant_id: participantId }),
+    });
+
+    if (!res.ok) {
+        let message = "Failed to add participant";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
+            }
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
+    }
+
+    const data = await res.json();
+    const member: Member = {
+        userId: data.user_id || data.userId,
+        role: data.role || "member",
+    };
+
+    return member;
+}
+
+export async function removeChatParticipant(request: Request, chatId: string, participantId: string): Promise<void> {
+    const accessToken = await requireAccessToken(request);
+
+    const res = await fetch(process.env.API_URL + `/chats/${chatId}/participants/${participantId}`, {
+        method: "DELETE",
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        let message = "Failed to remove participant";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
+            }
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
+    }
+}
+
+export async function deleteChat(request: Request, chatId: string): Promise<void> {
+    const accessToken = await requireAccessToken(request);
+
+    const res = await fetch(process.env.API_URL + `/chats/${chatId}`, {
+        method: "DELETE",
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        let message = "Failed to delete chat";
+        try {
+            const data = await res.json();
+            if (typeof data?.error === "string" && data.error.trim().length > 0) {
+                message = data.error;
+            }
+        } catch {
+            // ignore parse errors
+        }
+        throw new Error(message);
+    }
+}
 
 
 function toCamelCase(str: string): string {

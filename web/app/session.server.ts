@@ -1,4 +1,5 @@
 import { createCookieSessionStorage, redirect } from "react-router";
+import type { Profile } from "~/model";
 import { requireAccessToken } from "./utils/auth.server";
 
 

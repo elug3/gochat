@@ -8,18 +8,25 @@ export function useChatWebSocket(wsToken: string) {
     const upsertMessage = useChatStore((s) => s.upsertMessage)
 
     useEffect(() => {
+        if (!wsToken) return;
         if (wsRef.current) return; // already connected
 
+        setWsState("connecting");
         const ws = new WebSocket(`ws://localhost:12345/ws?token=${wsToken}`); // TODO
         wsRef.current = ws;
 
         ws.onopen = () => {
-            setWsState("open")
+            setWsState("open");
             console.log("WebSocket connected");
         };
         ws.onclose = () => {
-            setWsState("closed")
+            setWsState("closed");
+            wsRef.current = null;
             console.log("WebSocket disconnected");
+        };
+        ws.onerror = (event) => {
+            console.error("WebSocket error:", event);
+            setWsState("closed");
         };
 
         ws.onmessage = (event) => {
@@ -33,7 +40,8 @@ export function useChatWebSocket(wsToken: string) {
         };
 
         return () => {
+            wsRef.current = null;
             ws.close();
-        }; 
+        };
     }, [wsToken, setWsState, upsertMessage]);
 }

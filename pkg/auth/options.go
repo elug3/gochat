@@ -18,7 +18,11 @@ type Options struct {
 	SaveDir  string
 	InMemory bool
 
-	NatsUrl string
+	// debug disables recovery middleware
+	debug bool
+
+	NatsUrl  string
+	NoEvents bool
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -41,6 +45,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.BoolVar(&opts.InMemory, "in-memory", false, "Use in-memory database")
 
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "NATS server URL")
+	fs.BoolVar(&opts.NoEvents, "no-events", false, "Disable event publishing")
+
+	fs.BoolVar(&opts.debug, "debug", false, "Enable debug mode")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
