@@ -9,7 +9,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -245,7 +244,7 @@ func (s *AuthService) WebauthnRegisterStart(ctx context.Context, userId int32) (
 	return creation, nil
 }
 
-func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, r *http.Request) error {
+func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, pcc *protocol.ParsedCredentialCreationData) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -256,18 +255,23 @@ func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, 
 	if err != nil {
 		return fmt.Errorf("failed to load webauthn user: %w", err)
 	}
-	session, err := s.store.GetSessionData(ctx, tx, r.FormValue("challenge"))
+
+	challenge := pcc.Response.CollectedClientData.Challenge
+
+	session, err := s.store.GetSessionData(ctx, tx, challenge)
 	if err != nil {
 		return fmt.Errorf("failed to get session data: %w", err)
 	}
-
-	credential, err := s.wAuth.FinishRegistration(u, *session, r)
+	credential, err := s.wAuth.CreateCredential(u, *session, pcc)
 	if err != nil {
-		return fmt.Errorf("failed to finish credential registration: %w", err)
+		return fmt.Errorf("failed to create credential: %w", err)
+	}
+	if err = s.store.SaveWebAuthnCredential(ctx, tx, userId, credential); err != nil {
+		return fmt.Errorf("cannot save webauthn credential: %w", err)
 	}
 
-	if err := s.store.SaveWebAuthnCredential(ctx, tx, userId, credential); err != nil {
-		return fmt.Errorf("cannot save webauthn credential: %w", err)
+	if err = s.store.DeleteSessionData(ctx, tx, challenge); err != nil {
+		return fmt.Errorf("cannot delete session data: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {

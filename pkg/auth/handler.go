@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/rs/zerolog/log"
 )
 
@@ -184,7 +185,16 @@ func (h *AuthHandler) HandleWebAuthnRegisterFinish(c *gin.Context) {
 		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	h.auth.WebauthnRegisterFinish(c.Request.Context(), userId, c.Request)
+	pcc, err := protocol.ParseCredentialCreationResponse(c.Request)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	err = h.auth.WebauthnRegisterFinish(c.Request.Context(), userId, pcc)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 }
 
 func parseUserId(c *gin.Context) (int32, error) {

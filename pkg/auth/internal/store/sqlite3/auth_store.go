@@ -138,7 +138,7 @@ func (store *AuthStore) GetSessionData(ctx context.Context, tx *sql.Tx, challeng
 	var data []byte
 	if err := row.Scan(&data); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, errs.ErrNotFound
 		}
 		return nil, fmt.Errorf("cannot scan session data: %w", err)
 	}
@@ -184,6 +184,18 @@ func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, 
 	`, userId, data)
 	if err != nil {
 		return fmt.Errorf("cannot insert credential data: %w", err)
+	}
+
+	return nil
+}
+
+func (store *AuthStore) DeleteSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
+	_, err := tx.ExecContext(ctx, `
+	DELETE FROM webauthn_sessions
+	WHERE challenge = ?;
+	`, challenge)
+	if err != nil {
+		return fmt.Errorf("cannot delete session data: %w", err)
 	}
 
 	return nil
