@@ -27,8 +27,11 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.GET("/ws", h.HandleUseWsToken)
 	r.POST("/ws", h.HandleCreateWsToken)
 
-	r.Any("/webauthn/register/begin", h.HandleWebAuthnRegisterBegin)
-	r.Any("/webauthn/register/finish", h.HandleWebAuthnRegisterFinish)
+	r.POST("/webauthn/register/begin", h.HandleWebAuthnRegisterBegin)
+	r.POST("/webauthn/register/finish", h.HandleWebAuthnRegisterFinish)
+
+	r.POST("/webauthn/login/begin", h.HandleWebAuthnLoginBegin)
+	r.POST("webauthn/login/finish", h.HandleWebAuthnLoginFinish)
 }
 
 func Logger() gin.HandlerFunc {
@@ -40,6 +43,7 @@ func Logger() gin.HandlerFunc {
 			Str("path", c.Request.URL.Path).
 			Int("status", c.Writer.Status()).
 			Int("size", c.Writer.Size()).
+			Err(c.Errors.Last()).
 			Send()
 	}
 }
@@ -166,8 +170,9 @@ func (h *AuthHandler) HandleWebAuthnRegisterBegin(c *gin.Context) {
 		return
 	}
 
-	creation, err := h.auth.WebauthnRegisterStart(c.Request.Context(), uid)
+	creation, err := h.auth.WebAuthnRegisterBegin(c.Request.Context(), uid)
 	if err != nil {
+		c.Error(err)
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -190,11 +195,34 @@ func (h *AuthHandler) HandleWebAuthnRegisterFinish(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	err = h.auth.WebauthnRegisterFinish(c.Request.Context(), userId, pcc)
+	err = h.auth.WebAuthnRegisterFinish(c.Request.Context(), userId, pcc)
 	if err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+}
+
+func (h *AuthHandler) HandleWebAuthnLoginBegin(c *gin.Context) {
+	assertion, err := h.auth.WebAuthnLoginBegin(c.Request.Context())
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, assertion)
+}
+
+func (h *AuthHandler) HandleWebAuthnLoginFinish(c *gin.Context) {
+	pca, err := protocol.ParseCredentialRequestResponse(c.Request)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := h.auth.WebAuthnLoginFinish(c.Request.Context(), pca)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, token)
 }
 
 func parseUserId(c *gin.Context) (int32, error) {

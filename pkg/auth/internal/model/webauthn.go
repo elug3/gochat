@@ -1,9 +1,13 @@
 package model
 
-import "github.com/go-webauthn/webauthn/webauthn"
+import (
+	"strconv"
+
+	"github.com/go-webauthn/webauthn/webauthn"
+)
 
 type WebAuthnUser struct {
-	Id          []byte
+	Id          int32
 	Name        string
 	DisplayName string
 	Icon        string
@@ -11,7 +15,7 @@ type WebAuthnUser struct {
 }
 
 func (u *WebAuthnUser) WebAuthnID() []byte {
-	return u.Id
+	return UserHandlerIdBytes(u.Id)
 }
 
 func (u *WebAuthnUser) WebAuthnName() string {
@@ -28,4 +32,16 @@ func (u *WebAuthnUser) WebAuthnIcon() string {
 
 func (u *WebAuthnUser) WebAuthnCredentials() []webauthn.Credential {
 	return u.Credentials
+}
+
+func UserHandlerIdBytes(userId int32) []byte {
+	return []byte(strconv.FormatInt(int64(userId), 10))
+}
+
+func UserIdFromUserHandler(userHandle []byte) (int32, error) {
+	id, err := strconv.ParseInt(string(userHandle), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int32(id), nil
 }

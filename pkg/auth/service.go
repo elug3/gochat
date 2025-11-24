@@ -213,22 +213,24 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 	return token, nil
 }
 
-func (s *AuthService) WebauthnRegisterStart(ctx context.Context, userId int32) (*protocol.CredentialCreation, error) {
+func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (*protocol.CredentialCreation, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	u, err := s.store.LoadWebAuthnUser(ctx, tx, userId)
+	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load webauthn user: %w", err)
 	}
 
-	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationDefault,
+	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationOptional,
 		webauthn.WithExclusions(webauthn.Credentials(u.WebAuthnCredentials()).CredentialDescriptors()),
 		webauthn.WithExtensions(map[string]any{"creProps": true}),
 	)
+	// DEBUG
+	fmt.Printf("creation.Response.User.ID: %v\n", creation.Response.User.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin registration: %w", err)
 	}
@@ -244,14 +246,14 @@ func (s *AuthService) WebauthnRegisterStart(ctx context.Context, userId int32) (
 	return creation, nil
 }
 
-func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, pcc *protocol.ParsedCredentialCreationData) error {
+func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, pcc *protocol.ParsedCredentialCreationData) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	u, err := s.store.LoadWebAuthnUser(ctx, tx, userId)
+	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
 		return fmt.Errorf("failed to load webauthn user: %w", err)
 	}
@@ -279,6 +281,79 @@ func (s *AuthService) WebauthnRegisterFinish(ctx context.Context, userId int32, 
 	}
 
 	return nil
+}
+
+func (s *AuthService) WebAuthnLoginBegin(ctx context.Context) (*protocol.CredentialAssertion, error) {
+	assertion, session, err := s.wAuth.BeginDiscoverableMediatedLogin(protocol.MediationOptional)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err = s.store.SaveSessionData(ctx, tx, session); err != nil {
+		return nil, fmt.Errorf("cannot save session data: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return assertion, nil
+}
+
+func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *protocol.ParsedCredentialAssertionData) (*model.Token, error) {
+	var (
+		u   *model.WebAuthnUser
+		err error
+	)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	challenge := parsedResponse.Response.CollectedClientData.Challenge
+
+	session, err := s.store.GetSessionData(ctx, tx, challenge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session data: %w", err)
+	}
+
+	credential, err := s.wAuth.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (user webauthn.User, err error) {
+		uid, err := model.UserIdFromUserHandler(userHandle)
+		if err != nil {
+			return nil, fmt.Errorf("invalid user handle: %w", err)
+		}
+		if u, err = s.store.GetWebAuthnUser(ctx, tx, uid); err != nil {
+			return nil, fmt.Errorf("failed to load webauthn user: %w", err)
+		}
+		return u, nil
+	}, *session, parsedResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate login: %w", err)
+	}
+
+	if err = s.store.UpdateWebAuthnCredentialAfterLogin(ctx, tx, u.Id, credential); err != nil {
+		return nil, fmt.Errorf("cannot update webauthn credential: %w", err)
+	}
+
+	if err = s.store.DeleteSessionData(ctx, tx, challenge); err != nil {
+		return nil, fmt.Errorf("cannot delete session data: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// TODO: use configured expiration time
+	token, err := newToken(u.Id, s.jwtKey, time.Hour*24*7) // 7 days
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
 }
 
 // func (s *AuthService) GetUserByAccessToken(ctx context.Context, accessToken string) (*model.User, error) {

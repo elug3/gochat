@@ -2,10 +2,12 @@ package sqlite3
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/model"
@@ -118,9 +120,9 @@ func (store *AuthStore) SaveSessionData(ctx context.Context, tx *sql.Tx, session
 	}
 
 	_, err = tx.ExecContext(ctx, `
-	INSERT INTO webauthn_sessions (challenge, user_id, session_data)
-	VALUES (?, ?, ?);
-	`, session.Challenge, session.UserID, data)
+	INSERT INTO webauthn_sessions (challenge, session_data)
+	VALUES (?, ?);
+	`, session.Challenge, data)
 	if err != nil {
 		return fmt.Errorf("cannot insert session data: %w", err)
 	}
@@ -151,25 +153,16 @@ func (store *AuthStore) GetSessionData(ctx context.Context, tx *sql.Tx, challeng
 	return &session, nil
 }
 
-func (store *AuthStore) LoadWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
-	u, err := store.GetUserById(ctx, tx, userId)
+func (store *AuthStore) DeleteSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
+	_, err := tx.ExecContext(ctx, `
+	DELETE FROM webauthn_sessions
+	WHERE challenge = ?;
+	`, challenge)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("cannot delete session data: %w", err)
 	}
 
-	credentials, err := store.GetWebAuthnCredentials(ctx, tx, userId)
-	if err != nil {
-		return nil, err
-	}
-
-	return &model.WebAuthnUser{
-		Id:          []byte(fmt.Sprintf("%d", u.Id)),
-		Name:        u.Username,
-		DisplayName: u.Username,
-		Icon:        "",
-		Credentials: credentials,
-	}, nil
-
+	return nil
 }
 
 func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
@@ -189,19 +182,22 @@ func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, 
 	return nil
 }
 
-func (store *AuthStore) DeleteSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
-	_, err := tx.ExecContext(ctx, `
-	DELETE FROM webauthn_sessions
-	WHERE challenge = ?;
-	`, challenge)
+// GetWebAuthnUser returns the WebAuthnUser for the given userId.
+// It returns empty credentials user for valid user with no credentials.
+// If user does not exist, returns errs.ErrNotFound.
+func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
+	var u model.User
+	row := tx.QueryRowContext(ctx, `
+	SELECT id, username
+	FROM users
+	WHERE id = ?;`, userId)
+	err := row.Scan(&u.Id, &u.Username)
 	if err != nil {
-		return fmt.Errorf("cannot delete session data: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to query user: %w", err)
 	}
-
-	return nil
-}
-
-func (store *AuthStore) GetWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) ([]webauthn.Credential, error) {
 	rows, err := tx.QueryContext(ctx, `
 	SELECT credential_data
 	FROM webauthn_credentials
@@ -214,24 +210,45 @@ func (store *AuthStore) GetWebAuthnCredentials(ctx context.Context, tx *sql.Tx, 
 
 	var credentials []webauthn.Credential
 	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
+		var credData []byte
+		if err := rows.Scan(&credData); err != nil {
 			return nil, fmt.Errorf("cannot scan credential data: %w", err)
 		}
-
-		var credential webauthn.Credential
-		if err := json.Unmarshal(data, &credential); err != nil {
+		var cred webauthn.Credential
+		if err := json.Unmarshal(credData, &cred); err != nil {
 			return nil, fmt.Errorf("cannot unmarshal credential data: %w", err)
 		}
-
-		credentials = append(credentials, credential)
+		credentials = append(credentials, cred)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating over credential rows: %w", err)
+		return nil, fmt.Errorf("cannot iterate over credential rows: %w", err)
 	}
 
-	return credentials, nil
+	return &model.WebAuthnUser{
+		Id:          u.Id,
+		Name:        u.Username,
+		DisplayName: u.Username,
+		Icon:        "",
+		Credentials: credentials,
+	}, nil
+}
+
+func (store *AuthStore) UpdateWebAuthnCredentialAfterLogin(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
+	data, err := json.Marshal(credential)
+	if err != nil {
+		return fmt.Errorf("cannot marshal credential data: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+	UPDATE webauthn_credentials
+	SET credential_data = ?, updated_at = CURRENT_TIMESTAMP
+	WHERE user_id = ?;
+	`, data, userId)
+	if err != nil {
+		return fmt.Errorf("cannot update credential data: %w", err)
+	}
+
+	return nil
 }
 
 func (store *AuthStore) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) error {
@@ -310,25 +327,37 @@ func initWebAuthnTable(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
 	CREATE TABLE IF NOT EXISTS webauthn_sessions (
 		challenge TEXT PRIMARY KEY,
-		user_id INTEGER NOT NULL,
 		session_data BLOB NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`)
 	if err != nil {
 		return fmt.Errorf("cannot create webauthn table: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS webauthn_credentials (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
 		credential_data BLOB NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	);`)
 	if err != nil {
 		return fmt.Errorf("cannot create webauthn credentials table: %w", err)
 	}
 
 	return nil
+}
+
+func randomIdBytes() ([]byte, error) {
+	id := make([]byte, 8)
+	_, err := rand.Read(id)
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate random id: %w", err)
+	}
+	return id, nil
+}
+
+func userHandlerIDBytes(userId int32) []byte {
+	return []byte(strconv.FormatInt(int64(userId), 10))
 }
