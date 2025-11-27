@@ -172,6 +172,7 @@ func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password st
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 
 	passwordHash, err := newHash(password)
 	if err != nil {
@@ -179,6 +180,10 @@ func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password st
 	}
 	if err = s.store.SetPasswordHash(ctx, tx, uid, passwordHash); err != nil {
 		return fmt.Errorf("failed to set password: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	// TODO: publish event
@@ -227,10 +232,9 @@ func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (
 
 	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationOptional,
 		webauthn.WithExclusions(webauthn.Credentials(u.WebAuthnCredentials()).CredentialDescriptors()),
+		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementPreferred),
 		webauthn.WithExtensions(map[string]any{"creProps": true}),
 	)
-	// DEBUG
-	fmt.Printf("creation.Response.User.ID: %v\n", creation.Response.User.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin registration: %w", err)
 	}
@@ -253,6 +257,8 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 	}
 	defer tx.Rollback()
 
+	credentialName := "my_passkey" // TODO: get from request
+
 	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
 		return fmt.Errorf("failed to load webauthn user: %w", err)
@@ -268,7 +274,8 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 	if err != nil {
 		return fmt.Errorf("failed to create credential: %w", err)
 	}
-	if err = s.store.SaveWebAuthnCredential(ctx, tx, userId, credential); err != nil {
+
+	if err = s.store.SaveWebAuthnCredential(ctx, tx, userId, credentialName, credential); err != nil {
 		return fmt.Errorf("cannot save webauthn credential: %w", err)
 	}
 
@@ -279,6 +286,7 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	log.Info().Msgf("Registered new passkey for user %d", userId)
 
 	return nil
 }
@@ -356,18 +364,64 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 	return token, nil
 }
 
-// func (s *AuthService) GetUserByAccessToken(ctx context.Context, accessToken string) (*model.User, error) {
-// 	tx, err := s.db.BeginTx(ctx, nil)
-// 	uid, err := s.ValidateAccessToken(ctx, accessToken)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	u, err := s.store.GetUserById(ctx, tx, uid)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return u, nil
-// }
+func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32) ([]model.Passkey, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	passkeys, err := s.store.GetPasskeysByUserId(ctx, tx, userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get passkeys: %w", err)
+	}
+
+	return passkeys, nil
+}
+
+func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkeyId int32, newName string) (*model.Passkey, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	passkey, err := s.store.UpdatePasskey(ctx, tx, passkeyId, newName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update passkey: %w", err)
+	}
+	if passkey.UserId != userId {
+		return nil, fmt.Errorf("passkey does not belong to user")
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	log.Info().Msgf("Updated passkey %d for user %d", passkeyId, userId)
+	return passkey, nil
+}
+
+func (s *AuthService) DeleteWebAuthnPasskey(ctx context.Context, userId, passkeyId int32) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	passkey, err := s.store.DeletePasskeyById(ctx, tx, passkeyId)
+	if err != nil {
+		return fmt.Errorf("failed to delete passkey: %w", err)
+	}
+	if passkey.UserId != userId {
+		return fmt.Errorf("passkey does not belong to user")
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	log.Info().Msgf("Deleted passkey %d for user %d", passkeyId, userId)
+	return nil
+}
 
 // TODO: implement refresh token
 func Refresh(ctx context.Context, refreshToken string) (newAccessToken, newRefreshToken string, err error) {

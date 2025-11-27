@@ -32,6 +32,10 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 
 	r.POST("/webauthn/login/begin", h.HandleWebAuthnLoginBegin)
 	r.POST("webauthn/login/finish", h.HandleWebAuthnLoginFinish)
+
+	r.GET("/webauthn/passkeys", h.HandleGetWebAuthnPasskeys)
+	r.PUT("/webauthn/passkeys/:id", h.HandleUpdateWebAuthnPasskey)
+	r.DELETE("/webauthn/passkeys/:id", h.HandleDeleteWebAuthnPasskey)
 }
 
 func Logger() gin.HandlerFunc {
@@ -225,6 +229,78 @@ func (h *AuthHandler) HandleWebAuthnLoginFinish(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, token)
 }
 
+func (h *AuthHandler) HandleGetWebAuthnPasskeys(c *gin.Context) {
+	accessToken, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	uid, err := h.auth.ValidateAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	passkeys, err := h.auth.GetWebAuthnUserPasskeys(c.Request.Context(), uid)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Println(uid)
+	c.IndentedJSON(http.StatusOK, passkeys)
+}
+
+func (h *AuthHandler) HandleUpdateWebAuthnPasskey(c *gin.Context) {
+	accessToken, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	uid, err := h.auth.ValidateAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	var updateReq struct {
+		KeyId   int32  `json:"id" binding:"required"`
+		KeyName string `json:"key_name" binding:"required"`
+	}
+	if err = c.BindJSON(&updateReq); err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	passkey, err := h.auth.UpdateWebAuthnPasskey(c.Request.Context(), uid, updateReq.KeyId, updateReq.KeyName)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, passkey)
+}
+
+func (h *AuthHandler) HandleDeleteWebAuthnPasskey(c *gin.Context) {
+	accessToken, ok := parseBearerToken(c.Request)
+	if !ok {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	uid, err := h.auth.ValidateAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	keyId, err := parseInt32(c, "id")
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err = h.auth.DeleteWebAuthnPasskey(c.Request.Context(), uid, keyId); err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func parseUserId(c *gin.Context) (int32, error) {
 	uidStr := c.GetString("user_id")
 	if uidStr == "" {
@@ -244,4 +320,13 @@ func parseBearerToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return parts[1], true
+}
+
+func parseInt32(c *gin.Context, name string) (int32, error) {
+	idStr := c.Param(name)
+	id, err := strconv.ParseInt(idStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %v", name, err)
+	}
+	return int32(id), nil
 }

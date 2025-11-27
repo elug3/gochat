@@ -14,11 +14,20 @@ import (
 func newTestService(t *testing.T) (*auth.AuthService, error) {
 	t.Helper()
 
-	return auth.NewAuthService(&auth.Options{
+	service, err := auth.NewAuthService(&auth.Options{
 		UseTmpKey: true,
 		InMemory:  true,
 		NoEvents:  true,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	t.Cleanup(func() {
+		service.Close()
+	})
+
+	return service, nil
 }
 
 func genUser(t *testing.T, service *auth.AuthService) (*model.User, error) {
@@ -90,6 +99,104 @@ func TestPassword(t *testing.T) {
 				t.Fatalf("failed to create user: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoginAndValidateAccessToken(t *testing.T) {
+	service, err := newTestService(t)
+	if err != nil {
+		t.Fatalf("failed to create test service: %v", err)
+	}
+
+	u, err := genUser(t, service)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	token, err := service.Login(t.Context(), u.Username, "password")
+	if err != nil {
+		t.Fatalf("failed to login with valid credentials: %v", err)
+	}
+	if token.UserId != u.Id {
+		t.Fatalf("expected token user id %d, got %d", u.Id, token.UserId)
+	}
+
+	uid, err := service.ValidateAccessToken(t.Context(), token.AccessToken)
+	if err != nil {
+		t.Fatalf("failed to validate access token: %v", err)
+	}
+	if uid != u.Id {
+		t.Fatalf("expected validated user id %d, got %d", u.Id, uid)
+	}
+
+	if _, err := service.Login(t.Context(), u.Username, "wrong-password"); errors.Is(err, errs.ErrAuthenticationFailure) == false {
+		t.Fatalf("expected authentication failure for wrong password, got: %v", err)
+	}
+
+	if _, err := service.ValidateAccessToken(t.Context(), token.AccessToken+"tampered"); err == nil {
+		t.Fatalf("expected tampered token to be rejected")
+	}
+}
+
+func TestWebsocketTokenLifecycle(t *testing.T) {
+	service, err := newTestService(t)
+	if err != nil {
+		t.Fatalf("failed to create test service: %v", err)
+	}
+
+	u, err := genUser(t, service)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	token, err := service.Login(t.Context(), u.Username, "password")
+	if err != nil {
+		t.Fatalf("failed to login with valid credentials: %v", err)
+	}
+
+	wsToken, err := service.CreateWsToken(t.Context(), token.AccessToken)
+	if err != nil {
+		t.Fatalf("failed to create websocket token: %v", err)
+	}
+	if wsToken == "" {
+		t.Fatalf("expected websocket token value")
+	}
+
+	userId, err := service.UseWsToken(t.Context(), wsToken)
+	if err != nil {
+		t.Fatalf("failed to use websocket token: %v", err)
+	}
+	if userId != u.Id {
+		t.Fatalf("expected user id %d from websocket token, got %d", u.Id, userId)
+	}
+
+	if _, err := service.UseWsToken(t.Context(), wsToken); errors.Is(err, errs.ErrAuthenticationFailure) == false {
+		t.Fatalf("expected websocket token to be single-use, got: %v", err)
+	}
+}
+
+func TestUpdatePassword(t *testing.T) {
+	service, err := newTestService(t)
+	if err != nil {
+		t.Fatalf("failed to create test service: %v", err)
+	}
+
+	username := genRandomUsername()
+	u, err := service.RegisterUser(t.Context(), username, "old-password", "test")
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	if err := service.UpdatePassword(t.Context(), u.Id, "new-password"); err != nil {
+		t.Fatalf("failed to update password: %v", err)
+	}
+
+	if _, err := service.Login(t.Context(), username, "old-password"); errors.Is(err, errs.ErrAuthenticationFailure) == false {
+		t.Fatalf("expected login with old password to fail, got: %v", err)
+	}
+
+	if _, err := service.Login(t.Context(), username, "new-password"); err != nil {
+		t.Fatalf("expected login with new password to succeed, got: %v", err)
 	}
 }
 

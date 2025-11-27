@@ -23,7 +23,7 @@ func NewAuthStore(saveDir string, inMemory bool) (*AuthStore, error) {
 	var db *sql.DB
 	var path string
 	if inMemory {
-		path = ":memory:"
+		path = "file::memory:?cache=shared"
 	} else {
 		path = saveDir + "/auth.db"
 	}
@@ -165,16 +165,16 @@ func (store *AuthStore) DeleteSessionData(ctx context.Context, tx *sql.Tx, chall
 	return nil
 }
 
-func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
+func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential_name string, credential *webauthn.Credential) error {
 	data, err := json.Marshal(credential)
 	if err != nil {
 		return fmt.Errorf("cannot marshal credential data: %w", err)
 	}
 
 	_, err = tx.ExecContext(ctx, `
-	INSERT INTO webauthn_credentials (user_id, credential_data)
-	VALUES (?, ?);
-	`, userId, data)
+	INSERT INTO webauthn_credentials (user_id, name, credential_data)
+	VALUES (?, ?, ?);
+	`, userId, credential_name, data)
 	if err != nil {
 		return fmt.Errorf("cannot insert credential data: %w", err)
 	}
@@ -263,6 +263,90 @@ func (store *AuthStore) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.T
 	return nil
 }
 
+func (store *AuthStore) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int32, passkeyName string) (*model.Passkey, error) {
+	row := tx.QueryRowContext(ctx, `
+	UPDATE webauthn_credentials
+	SET name = ?
+	WHERE id = ?
+	RETURNING id, name, user_id, created_at, last_used_at;
+	`, passkeyName, passkeyId)
+
+	var updatedPasskey model.Passkey
+	if err := row.Scan(
+		&updatedPasskey.Id,
+		&updatedPasskey.KeyName,
+		&updatedPasskey.UserId,
+		&updatedPasskey.CreatedAt,
+		&updatedPasskey.LastUsedAt,
+	); err != nil {
+		return nil, fmt.Errorf("cannot update passkey: %w", err)
+	}
+	return &updatedPasskey, nil
+}
+
+func (store *AuthStore) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId int32) (*model.Passkey, error) {
+	row := tx.QueryRowContext(ctx, `
+	DELETE FROM webauthn_credentials
+	WHERE id = ?
+	RETURNING id, name, user_id, created_at, last_used_at;
+	`, passkeyId)
+
+	var deletedPasskey model.Passkey
+	if err := row.Scan(
+		&deletedPasskey.Id,
+		&deletedPasskey.KeyName,
+		&deletedPasskey.UserId,
+		&deletedPasskey.CreatedAt,
+		&deletedPasskey.LastUsedAt,
+	); err != nil {
+		return nil, fmt.Errorf("cannot delete passkey: %w", err)
+	}
+	return &deletedPasskey, nil
+}
+
+func (store *AuthStore) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId int32) ([]model.Passkey, error) {
+	rows, err := tx.QueryContext(ctx, `
+	SELECT id, name, user_id, created_at, last_used_at
+	FROM webauthn_credentials
+	WHERE user_id = ?;
+	`, userId)
+	if err != nil {
+		return nil, fmt.Errorf("cannot query passkeys: %w", err)
+	}
+	defer rows.Close()
+
+	passkeys := make([]model.Passkey, 0)
+	for rows.Next() {
+		var pk model.Passkey
+		if err := rows.Scan(
+			&pk.Id,
+			&pk.KeyName,
+			&pk.UserId,
+			&pk.CreatedAt,
+			&pk.LastUsedAt); err != nil {
+			return nil, fmt.Errorf("cannot scan passkey: %w", err)
+		}
+		passkeys = append(passkeys, pk)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cannot iterate over passkey rows: %w", err)
+	}
+
+	return passkeys, nil
+}
+
+func (store *AuthStore) UpdatePasskeyLastUsedAt(ctx context.Context, tx *sql.Tx, passkeyId int32) error {
+	_, err := tx.ExecContext(ctx, `
+	UPDATE webauthn_credentials
+	SET last_used_at = CURRENT_TIMESTAMP
+	WHERE id = ?;
+	`, passkeyId)
+	if err != nil {
+		return fmt.Errorf("cannot update passkey last_used_at: %w", err)
+	}
+	return nil
+}
+
 func (store *AuthStore) Close() error {
 	if store.db != nil {
 		return store.db.Close()
@@ -328,22 +412,23 @@ func initWebAuthnTable(ctx context.Context, tx *sql.Tx) error {
 	CREATE TABLE IF NOT EXISTS webauthn_sessions (
 		challenge TEXT PRIMARY KEY,
 		session_data BLOB NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`)
 	if err != nil {
-		return fmt.Errorf("cannot create webauthn table: %w", err)
+		return fmt.Errorf("cannot create webauthn_session table: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS webauthn_credentials (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
 		user_id INTEGER NOT NULL,
 		credential_data BLOB NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		last_used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	);`)
 	if err != nil {
-		return fmt.Errorf("cannot create webauthn credentials table: %w", err)
+		return fmt.Errorf("cannot create webauthn_credentials table: %w", err)
 	}
 
 	return nil

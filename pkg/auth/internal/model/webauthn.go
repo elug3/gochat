@@ -2,6 +2,7 @@ package model
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -44,4 +45,12 @@ func UserIdFromUserHandler(userHandle []byte) (int32, error) {
 		return 0, err
 	}
 	return int32(id), nil
+}
+
+type Passkey struct {
+	Id         int32     `json:"id"`
+	KeyName    string    `json:"key_name"`
+	UserId     int32     `json:"user_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
 }
