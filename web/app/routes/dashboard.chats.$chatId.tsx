@@ -108,6 +108,28 @@ type MessageGroup = {
   messages: Message[];
 }
 
+function normalizeMessageSender(message: Message): Message {
+  if (typeof (message as any).sender === "number") {
+    return message;
+  }
+
+  const legacySender = (message as any).senderId;
+  if (legacySender !== undefined) {
+    return { ...message, sender: Number(legacySender) };
+  }
+
+  return message;
+}
+
+function sortMessages(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    if (a.sentAt === b.sentAt) {
+      return a.id - b.id;
+    }
+    return a.sentAt - b.sentAt;
+  });
+}
+
 function groupMessagesBySender(messages: Message[]): MessageGroup[] {
   const grouped: MessageGroup[] = [];
   let current: MessageGroup | null = null;
@@ -132,28 +154,45 @@ export default function ChatDetail() {
     const { user } = useUser();
     const currentUserId = user?.id ?? null;
     const setChatMessages = useChatStore((s) => s.setChatMessages);
-    const chatMessages = useChatStore((s) => (chatId ? s.chatsMessages[chatId] : undefined));
 
     const loaderMessages = useMemo(() => loaderData.messages ?? [], [loaderData.messages]);
     const members = loaderData.members ?? [];
-    const [messages, setMessages] = useState<Message[]>(loaderMessages);
+    const [messages, setMessages] = useState<Message[]>(() => sortMessages(loaderMessages.map(normalizeMessageSender)));
+    const [openMenuMessageId, setOpenMenuMessageId] = useState<number | null>(null);
 
     useEffect(() => {
       if (!chatId) return;
-      setChatMessages(chatId, loaderMessages);
+      const existing = useChatStore.getState().chatsMessages[chatId];
+      const merged = new Map<number, Message>();
+      const normalizedLoader = loaderMessages.map(normalizeMessageSender);
+      const normalizedExisting = existing ? Object.values(existing).map(normalizeMessageSender) : [];
+
+      normalizedLoader.forEach((msg) => merged.set(msg.id, msg));
+      if (existing) {
+        normalizedExisting.forEach((msg) => merged.set(msg.id, msg));
+      }
+      setChatMessages(chatId, Array.from(merged.values()));
     }, [chatId, loaderMessages, setChatMessages]);
 
     useEffect(() => {
-      const liveMessages = chatMessages ? Object.values(chatMessages) : loaderMessages;
-      console.log("Live messages updated:", liveMessages);
-      const orderedMessages = [...liveMessages].sort((a, b) => {
-        if (a.sentAt === b.sentAt) {
-          return a.id - b.id;
-        }
-        return a.sentAt - b.sentAt;
+      if (!chatId) return;
+
+      const syncMessages = (messagesMap?: Record<number, Message>) => {
+        const liveList = messagesMap ? Object.values(messagesMap) : loaderMessages;
+        const normalized = liveList.map(normalizeMessageSender);
+        setMessages(sortMessages(normalized));
+      };
+
+      syncMessages(useChatStore.getState().chatsMessages[chatId]);
+
+      const unsubscribe = useChatStore.subscribe((state, prev) => {
+        const next = state.chatsMessages[chatId];
+        if (next === prev.chatsMessages[chatId]) return;
+        syncMessages(next);
       });
-      setMessages(orderedMessages);
-    }, [chatMessages, loaderMessages]);
+
+      return unsubscribe;
+    }, [chatId, loaderMessages]);
 
     const memberLookup = useMemo(() => {
       const lookup = new Map<number, Member>();
@@ -168,6 +207,7 @@ export default function ChatDetail() {
 
     const groupedMessages = useMemo(() => groupMessagesBySender(messages), [messages]);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const messageListRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
       if (chatId) {
@@ -179,6 +219,16 @@ export default function ChatDetail() {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+        if (!messageListRef.current?.contains(event.target as Node)) {
+          setOpenMenuMessageId(null);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     if (outlet) {
       return outlet;
     }
@@ -186,7 +236,7 @@ export default function ChatDetail() {
     if (loaderData.error) {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center dark:bg-slate-950">
-          <div className="rounded-full bg-red-100 p-3 text-red-600 dark:bg-red-900/30 dark:text-red-300">
+          <div className="rounded-full bg-red-100 p-3 text-red-600 dark:bg-red-900 dark:text-red-300">
             <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-.008 3.6h.016v.2h-.016zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -227,8 +277,8 @@ export default function ChatDetail() {
     };
 
     return (
-      <div className="flex h-full w-full flex-col bg-slate-50/70 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/60 px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900/60">
+      <div className="flex h-full w-full flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate("/dashboard/chats")}
@@ -267,7 +317,7 @@ export default function ChatDetail() {
         <main className="flex-1 overflow-y-auto px-4 py-6">
           {groupedMessages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-500 dark:text-slate-400">
-              <div className="rounded-full bg-slate-200/70 p-3 text-slate-500 dark:bg-slate-800/80 dark:text-slate-300">
+              <div className="rounded-full bg-slate-200 p-3 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l-7 2 2-7 9-9a2.828 2.828 0 114 4l-9 9z" />
                 </svg>
@@ -278,33 +328,62 @@ export default function ChatDetail() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3" ref={messageListRef}>
               {groupedMessages.map((group) => {
                 const isOwn = currentUserId != null && group.senderId === currentUserId;
                 const bubbleAlignment = isOwn ? "items-end" : "items-start";
-                const bubbleClasses = isOwn
+                const bubbleBase = "w-full max-w-full rounded-lg px-3 py-2 text-[13px] leading-snug shadow-sm ring-1 ring-slate-200 dark:ring-slate-800 select-text cursor-text flex items-center gap-3 justify-between";
+                const bubbleTone = isOwn
                   ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-900 dark:bg-slate-900/80 dark:text-slate-100";
-                const bubbleMeta = isOwn
-                  ? "text-blue-100"
-                  : "text-slate-400 dark:text-slate-400";
+                  : "bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100";
+                const bubbleMeta = isOwn ? "text-blue-100" : "text-slate-400 dark:text-slate-400";
 
                 return (
-                  <div key={`${group.senderId}-${group.messages[0]?.id ?? "group"}`} className={`flex w-full flex-col gap-1 ${bubbleAlignment}`}>
-                    <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                  <div key={`${group.senderId}-${group.messages[0]?.id ?? "group"}`} className={`flex w-full flex-col gap-1.5 ${bubbleAlignment}`}>
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
                       <span>{participantLabel(group.senderId)}</span>
                     </div>
-                    <div className={`flex flex-col gap-1 rounded-3xl px-4 py-3 shadow-sm ring-1 ring-slate-200/70 dark:ring-slate-800/60 ${bubbleClasses}`}>
-                      {group.messages.map((msg) => (
-                        <p key={msg.id} className="text-sm leading-relaxed">
-                          {msg.content}
-                          {msg.sentAt && (
-                            <span className={`ml-2 align-middle text-[11px] ${bubbleMeta}`}>
-                              {formatTime(msg.sentAt)}
-                            </span>
-                          )}
-                        </p>
-                      ))}
+                    <div className="flex flex-col gap-1.5">
+                      {group.messages.map((msg) => {
+                        const isMenuOpen = openMenuMessageId === msg.id;
+                        return (
+                          <div key={msg.id} className="group relative flex w-full items-center gap-2">
+                            <div className={`${bubbleBase} ${bubbleTone}`}>
+                              <p className="whitespace-pre-wrap flex-1 text-left">{msg.content}</p>
+                              {msg.sentAt && (
+                                <span className={`text-[11px] ${bubbleMeta} whitespace-nowrap`}>
+                                  {formatTime(msg.sentAt)}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              aria-label="Message options"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuMessageId(isMenuOpen ? null : msg.id);
+                              }}
+                              className={`h-7 w-7 rounded-full text-xs font-semibold transition opacity-0 group-hover:opacity-100 ${isOwn ? "hover:bg-blue-700/30" : "hover:bg-slate-200 dark:hover:bg-slate-800"} select-none`}
+                            >
+                              ⋯
+                            </button>
+                            {isMenuOpen && (
+                              <div className="absolute right-0 top-full z-10 mt-1 w-32 rounded-md border border-slate-200 bg-white text-sm shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                                {["Copy", "Reply", "Delete"].map((label) => (
+                                  <button
+                                    key={label}
+                                    type="button"
+                                    onClick={() => setOpenMenuMessageId(null)}
+                                    className="flex w-full items-center px-3 py-2 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -315,7 +394,7 @@ export default function ChatDetail() {
           <div ref={bottomRef} />
         </main>
 
-        <footer className="border-t border-slate-200/70 bg-white/70 px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900/70">
+        <footer className="border-t border-slate-200 bg-white px-4 py-3 backdrop-blur-lg dark:border-slate-800 dark:bg-slate-900">
           <InputComponent />
         </footer>
       </div>

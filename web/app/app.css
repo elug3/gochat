@@ -5,50 +5,50 @@
 
 :root {
   --bg: #f8fafc;
-  --surface: rgba(255, 255, 255, 0.85);
-  --surface-muted: rgba(241, 245, 249, 0.9);
-  --card-bg: rgba(255, 255, 255, 0.92);
-  --card-border: rgba(148, 163, 184, 0.35);
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --card-bg: #ffffff;
+  --card-border: #cbd5e1;
   --text: #0f172a;
   --text-muted: #475569;
-  --input-bg: rgba(255, 255, 255, 0.95);
-  --input-border: rgba(148, 163, 184, 0.45);
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
   --primary: #2563eb;
   --secondary: #64748b;
   --accent: #1e293b;
   --error: #dc2626;
   --link: #2563eb;
-  --select: rgba(37, 99, 235, 0.12);
-  --border-color: rgba(148, 163, 184, 0.35);
+  --select: #e0e7ff;
+  --border-color: #cbd5e1;
   --badge-bg: #dbeafe;
   --badge-text: #1d4ed8;
   --badge-hover: #bfdbfe;
-  --dropdown-bg: rgba(255, 255, 255, 0.95);
-  --dropdown-border: rgba(148, 163, 184, 0.35);
+  --dropdown-bg: #ffffff;
+  --dropdown-border: #cbd5e1;
 }
 
 html.dark {
   --bg: #020817;
-  --surface: rgba(15, 23, 42, 0.88);
-  --surface-muted: rgba(11, 18, 35, 0.9);
-  --card-bg: rgba(15, 23, 42, 0.85);
-  --card-border: rgba(71, 85, 105, 0.4);
+  --surface: #0f172a;
+  --surface-muted: #0b1324;
+  --card-bg: #0f172a;
+  --card-border: #334155;
   --text: #e2e8f0;
   --text-muted: #94a3b8;
-  --input-bg: rgba(15, 23, 42, 0.92);
-  --input-border: rgba(71, 85, 105, 0.7);
+  --input-bg: #0f172a;
+  --input-border: #475569;
   --primary: #60a5fa;
   --secondary: #94a3b8;
   --accent: #38bdf8;
   --error: #f87171;
   --link: #93c5fd;
-  --select: rgba(96, 165, 250, 0.15);
-  --border-color: rgba(71, 85, 105, 0.55);
-  --badge-bg: rgba(37, 99, 235, 0.22);
+  --select: #1f2937;
+  --border-color: #475569;
+  --badge-bg: #1e3a8a;
   --badge-text: #bfdbfe;
-  --badge-hover: rgba(37, 99, 235, 0.32);
-  --dropdown-bg: rgba(15, 23, 42, 0.95);
-  --dropdown-border: rgba(71, 85, 105, 0.6);
+  --badge-hover: #1d4ed8;
+  --dropdown-bg: #0f172a;
+  --dropdown-border: #334155;
 }
 
 body {
@@ -349,7 +349,7 @@ a {
 
 .speech-bubble.me {
   align-self: flex-end;
-  background-color: rgba(37, 99, 235, 0.12);
+  background-color: var(--select);
 }
 
 .speech-bubble.other {

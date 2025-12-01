@@ -68,13 +68,13 @@ export default function NewContactRoute() {
 				</div>
 
 				{actionData?.error && (
-					<div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3" role="alert">
+					<div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-800 rounded-md p-3" role="alert">
 						{actionData.error}
 					</div>
 				)}
 
 				{actionData?.ok && !actionData.error && (
-					<div className="text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md p-3" role="status">
+					<div className="text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-800 rounded-md p-3" role="status">
 						Contact request sent successfully.
 					</div>
 				)}

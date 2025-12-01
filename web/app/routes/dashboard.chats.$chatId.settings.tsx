@@ -101,7 +101,7 @@ export default function ChatSettingsPage() {
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center dark:bg-slate-950">
-        <div className="rounded-full bg-red-100 p-3 text-red-600 dark:bg-red-900/30 dark:text-red-300">
+        <div className="rounded-full bg-red-100 p-3 text-red-600 dark:bg-red-900 dark:text-red-300">
           <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-.008 3.6h.016v.2h-.016zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -125,10 +125,10 @@ export default function ChatSettingsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-6 bg-slate-50/70 px-6 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex h-full flex-col gap-6 bg-slate-50 px-6 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="flex items-center justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500/70 dark:text-slate-400/70">Chat settings</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Chat settings</p>
           <h1 className="mt-1 text-2xl font-semibold">{chat.name}</h1>
         </div>
         <Link
@@ -143,18 +143,18 @@ export default function ChatSettingsPage() {
       </header>
 
       {actionData?.error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-900 dark:text-rose-200">
           {actionData.error}
         </div>
       )}
 
       {actionData?.ok && actionData.message && actionData.message !== "Chat deleted" && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-900 dark:text-emerald-200">
           {actionData.message}
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-200/70 bg-white/70 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Chat name</h2>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Update the chat title to help members recognize this conversation.</p>
         <Form method="post" className="mt-4 flex flex-col gap-3">
@@ -181,7 +181,7 @@ export default function ChatSettingsPage() {
         </Form>
       </section>
 
-      <section className="rounded-xl border border-slate-200/70 bg-white/70 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Participants</h2>
@@ -194,13 +194,13 @@ export default function ChatSettingsPage() {
 
         <div className="mt-4 space-y-3">
           {sortedMembers.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-300/70 bg-white/60 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+            <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
               No participants found.
             </p>
           ) : (
             <ul className="space-y-2">
               {sortedMembers.map((member) => (
-                <li key={member.userId} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950/80">
+                <li key={member.userId} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950">
                   <div>
                     <p className="font-medium text-slate-700 dark:text-slate-200">User {member.userId}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">{member.role}</p>
@@ -243,7 +243,7 @@ export default function ChatSettingsPage() {
         </Form>
       </section>
 
-      <section className="rounded-xl border border-rose-200/60 bg-rose-50/80 p-5 shadow-sm dark:border-rose-900/40 dark:bg-rose-900/20">
+      <section className="rounded-xl border border-rose-200 bg-rose-50 p-5 shadow-sm dark:border-rose-900 dark:bg-rose-900">
         <h2 className="text-sm font-semibold text-rose-700 dark:text-rose-200">Danger zone</h2>
         <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">Deleting this chat will remove all messages for every participant. This cannot be undone.</p>
         <Form

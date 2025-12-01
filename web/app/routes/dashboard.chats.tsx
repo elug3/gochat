@@ -31,10 +31,10 @@ export function Sidebar() {
   const chatList = Object.values(chats || {}).flat();
 
   const wsBadgeStyles = wsState === "open"
-    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
     : wsState === "connecting"
-      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
-      : "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300";
+      ? "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300"
+      : "bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300";
 
 
   const handleCreateGroup = () => {
@@ -48,11 +48,11 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-full flex-col gap-4 bg-slate-50/80 p-4 text-slate-900 dark:bg-slate-950/60 dark:text-slate-100">
+    <aside className="flex h-full flex-col gap-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500/70 dark:text-slate-400/70">Messages</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Messages</p>
             <h2 className="mt-1 text-xl font-semibold">Chats</h2>
           </div>
           <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-800 dark:text-slate-400">
@@ -117,7 +117,7 @@ export function Sidebar() {
 
       <nav className="flex-1 overflow-hidden">
         {chatList.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-300/70 bg-white/60 p-6 text-center text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
             <svg className="h-8 w-8 text-slate-300 dark:text-slate-700" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m-3 8a9 9 0 110-18 9 9 0 010 18z" />
             </svg>
@@ -141,8 +141,8 @@ export function Sidebar() {
                     to={`${chat.id}`}
                     className={({ isActive }) => {
                       const base = "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition";
-                      const active = "bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/80";
-                      const inactive = "bg-white/60 text-slate-700 hover:bg-slate-100/80 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900";
+                      const active = "bg-blue-600 text-white shadow-sm ring-1 ring-blue-500";
+                      const inactive = "bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
                       return `${base} ${isActive ? active : inactive}`;
                     }}
                   >
@@ -150,7 +150,7 @@ export function Sidebar() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate font-medium">{chat.name}</span>
                         {chat.unreadCount > 0 && (
-                          <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-white/90 px-1 text-xs font-semibold text-blue-600 shadow-sm group-hover:bg-white">
+                          <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-white px-1 text-xs font-semibold text-blue-600 shadow-sm group-hover:bg-white">
                             {chat.unreadCount}
                           </span>
                         )}
@@ -170,7 +170,7 @@ export function Sidebar() {
         )}
       </nav>
 
-      <div className="mt-auto rounded-xl border border-slate-200/70 bg-white/70 px-3 py-3 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <div className="mt-auto rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <p className="flex items-center justify-between text-slate-500 dark:text-slate-400">
           <span className="font-medium text-slate-600 dark:text-slate-200">Connection</span>
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${wsBadgeStyles}`}>

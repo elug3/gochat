@@ -1,67 +1,163 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Form, redirect, useActionData, useFetcher, type ActionFunctionArgs } from "react-router";
 import { commitSession, getSession } from "~/session.server";
 import { login } from "~/utils/auth.server";
 
-const PASSKEY_SERVER_URL = "http://localhost:8001";
+const WEBAUTHN_LOGIN_START_URL = `http://localhost:8080/webauthn/login/begin`;
+const WEBAUTHN_LOGIN_FINISH_URL = `http://localhost:8080/webauthn/login/finish`;
 
 export async function action({ request }: ActionFunctionArgs) {
 
   const formData = await request.formData();
   const intent = formData.get("_action");
 
-  if (intent === "passkey-login") {
-    const accessToken = formData.get("accessToken");
-    const userId = formData.get("userId");
+  switch (intent) {
+    case "passkey-login-start": {
+      try {
+        const startRes = await fetch(`${WEBAUTHN_LOGIN_START_URL}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
 
-    if (typeof accessToken !== "string" || typeof userId !== "string") {
-      return { error: "Invalid passkey response" };
+        if (!startRes.ok) {
+          console.error("Passkey login start failed:", await startRes.text());
+          return Response.json({ ok: false, error: "Failed to initiate passkey login." }, { status: startRes.status });
+        }
+        const { publicKey } = await startRes.json();
+        return Response.json({ ok: true, publicKey });
+      } catch (error) {
+        console.error("Passkey login start failed:", error);
+        return Response.json({ ok: false, error: "Failed to initiate passkey login." }, { status: 500 });
+      }
     }
 
-    const numericUserId = Number(userId);
-    if (!Number.isFinite(numericUserId)) {
-      return { error: "Invalid passkey user" };
+    case "passkey-login-finish": {
+      const credential = formData.get("credential");
+      if (typeof credential !== "string") {
+        return Response.json({ ok: false, error: "Invalid credential data." }, { status: 400 });
+      }
+
+      let parsedCredential: any;
+      try {
+        parsedCredential = JSON.parse(credential);
+      } catch (error) {
+        console.error("Failed to parse credential", error);
+        return Response.json({ ok: false, error: "Invalid credential data." }, { status: 400 });
+      }
+
+      console.log("Received credential:", parsedCredential?.id);
+      const finishRes = await fetch(WEBAUTHN_LOGIN_FINISH_URL, {
+        method: "POST",
+        body: JSON.stringify(parsedCredential),
+        headers: {"Content-Type": "application/json"},
+      });
+
+      if (!finishRes.ok) {
+        console.error("Passkey login finish failed:", await finishRes.text());
+        return Response.json({ ok: false, error: "Failed to complete passkey login." }, { status: finishRes.status });
+      }
+      const token = await finishRes.json();
+
+      const session = await getSession(request.headers.get("Cookie"));
+      const accessToken = token.AccessToken ?? token.accessToken;
+      const userId = token.UserId ?? token.userId;
+
+      if (!accessToken || !userId) {
+        return Response.json({ ok: false, error: "Invalid login response from server." }, { status: 500 });
+      }
+
+      session.set("accessToken", accessToken);
+      session.set("userId", userId);
+
+      return redirect("/dashboard", {
+        headers: {
+          "Set-Cookie": await commitSession(session),
+        },
+      });
     }
+    case "password-login":
+    case null:
+    case undefined: {
+      const username = formData.get("username");
+      const password = formData.get("password");
 
-    const session = await getSession();
-    session.set("accessToken", accessToken);
-    session.set("userId", numericUserId);
+      if (typeof username !== "string" || username.trim() === "") {
+        return {
+          error: "Please provide your username.",
+          usernameError: "Username is required.",
+        };
+      }
 
-    return redirect("/", {
-      headers: {
-        "Set-Cookie": await commitSession(session),
-      },
-    });
-  }
+      if (typeof password !== "string" || password.length < 8) {
+        return {
+          error: "Please provide your password.",
+          passwordError: "Password must be at least 8 characters.",
+        };
+      }
 
-  const username = formData.get("username");
-  const password = formData.get("password");
+      try {
+        const session = await getSession(request.headers.get("Cookie"));
+        const { accessToken, userId } = await login(username, password);
 
-  if (typeof username !== "string" || typeof password !== "string") {
-    return {error: "Invalid form data"};
-  }
+        session.set("accessToken", accessToken);
+        session.set("userId", userId);
 
-  try {
-    const session = await getSession();
-    const { accessToken, userId } = await login(username, password);
-    session.set("accessToken", accessToken);
-    session.set("userId", userId);
+        return redirect("/dashboard", {
+          headers: { "Set-Cookie": await commitSession(session) },
+        });
+      } catch (err: any) {
+        console.error("Password login failed:", err);
+        return {
+          error: err?.message || "Login failed. Please try again.",
+        };
+      }
+    }
+    default:
+      return Response.json({ ok: false, error: "Unknown action" }, { status: 400 });
+  // if (intent === "passkey-login-start") {
+  //   const startRes = await fetch(`${WEBAUTHN_LOGIN_START_URL}`, {
+  //     method: "POST",
+  //     headers: {
+  //       "Content-Type": "application/json",
+  //     },
+  //   });
+  //   console.log("Passkey login start response:", startRes);
+  // }
+
+  // const username = formData.get("username");
+  // const password = formData.get("password");
+
+  // if (typeof username !== "string" || typeof password !== "string") {
+  //   return {error: "Invalid form data"};
+  // }
+
+  // try {
+  //   const session = await getSession();
+  //   const { accessToken, userId } = await login(username, password);
+  //   session.set("accessToken", accessToken);
+  //   session.set("userId", userId);
     
-    return redirect("/", {
-      headers: {
-        "Set-Cookie": await commitSession(session),
-      },
-    });
-  } catch (err: any) {
-    return {
-      error: err.message,
-    };
+  //   return redirect("/", {
+  //     headers: {"Set-Cookie": await commitSession(session),},
+  //   });
+  // } catch (err: any) {
+  //   return {
+  //     error: err.message,
+  //   };
+  // }
   }
-
 }
 
 export default function LoginPage() {
-  const fetcher = useFetcher<{ error?: string }>();
+  type PasskeyActionResponse = {
+    ok?: boolean;
+    error?: string;
+    publicKey?: PublicKeyCredentialRequestOptions;
+  };
+
+  const fetcher = useFetcher<PasskeyActionResponse>();
   const actionData = useActionData<{ error?: string; usernameError?: string; passwordError?: string }>();
   const [showPassword, setShowPassword] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
@@ -73,6 +169,43 @@ export default function LoginPage() {
       ? fetcher.data.error
       : null;
   const combinedPasskeyError = passkeyError ?? serverPasskeyError;
+
+  useEffect(() => {
+    if (fetcher.state !== "idle") return;
+    if (!fetcher.data) return;
+
+    if (fetcher.data.error) {
+      setPasskeyError(fetcher.data.error);
+      setIsPasskeyClientBusy(false);
+      return;
+    }
+
+    if (isPasskeyClientBusy && fetcher.data.ok && fetcher.data.publicKey) {
+      const request = normalizePublicKeyRequest({ ...fetcher.data.publicKey });
+      navigator.credentials
+        .get({ publicKey: request })
+        .then((credential: Credential | null) => {
+          if (!credential) {
+            throw new Error("No credential returned");
+          }
+          const serialized = serializeAssertionResponse(credential as PublicKeyCredential);
+          fetcher.submit(
+            {
+              _action: "passkey-login-finish",
+              credential: JSON.stringify(serialized),
+            },
+            { method: "post", action: "/login" }
+          );
+        })
+        .catch((err) => {
+          console.error(err);
+          setPasskeyError("Failed to get passkey credential.");
+        })
+        .finally(() => {
+          setIsPasskeyClientBusy(false);
+        });
+    }
+  }, [fetcher.data, fetcher.state, isPasskeyClientBusy, fetcher]);
 
   const handlePasskeyLogin = async () => {
     setPasskeyError(null);
@@ -88,76 +221,8 @@ export default function LoginPage() {
     }
 
     setIsPasskeyClientBusy(true);
-
-    try {
-      const startRes = await fetch(`${PASSKEY_SERVER_URL}/login/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-      });
-
-      if (!startRes.ok) {
-        throw new Error("Failed to start a passkey sign in request.");
-      }
-
-      const { publicKey } = await startRes.json();
-      if (!publicKey || !publicKey.challenge) {
-        throw new Error("Invalid login challenge from server.");
-      }
-
-      normalizePublicKeyRequest(publicKey);
-
-      const credential = (await navigator.credentials.get({
-        publicKey,
-      })) as PublicKeyCredential | null;
-
-      if (!credential) {
-        throw new Error("Passkey authentication was cancelled.");
-      }
-
-      const finishRes = await fetch(`${PASSKEY_SERVER_URL}/login/finish`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify(credential),
-      });
-
-      let finishPayload: any = {};
-      try {
-        finishPayload = await finishRes.json();
-      } catch {
-        // ignore non JSON responses
-      }
-
-      if (!finishRes.ok) {
-        throw new Error(finishPayload?.error ?? "Failed to verify passkey.");
-      }
-
-      const accessToken = finishPayload?.accessToken ?? finishPayload?.AccessToken;
-      const userId = finishPayload?.userId ?? finishPayload?.UserId;
-
-      if (typeof accessToken !== "string" || (typeof userId !== "string" && typeof userId !== "number")) {
-        throw new Error("Authentication server returned an invalid response.");
-      }
-
-      fetcher.submit(
-        {
-          _action: "passkey-login",
-          accessToken,
-          userId: String(userId),
-        },
-        { method: "post" },
-      );
-    } catch (err) {
-      setPasskeyError(err instanceof Error ? err.message : "Failed to sign in with a passkey.");
-    } finally {
-      setIsPasskeyClientBusy(false);
-    }
-  };
+    fetcher.submit({ _action: "passkey-login-start" }, { method: "post", action: "/login" });
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
@@ -165,6 +230,7 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold mb-2 text-slate-900 dark:text-slate-100">Sign in</h1>
         <p className="lead mb-6">Enter your credentials to access your account.</p>
         <Form method="post" id="loginForm" noValidate className="space-y-4">
+          <input type="hidden" name="_action" value="password-login" />
           <div>
             <label htmlFor="username" className="text-slate-700 dark:text-slate-300">Username</label>
             <input 
@@ -221,7 +287,7 @@ export default function LoginPage() {
           </div>
           
           {actionData?.error && (
-            <div aria-live="polite" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3">
+          <div aria-live="polite" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-800 rounded-md p-3">
               {actionData.error}
             </div>
           )}
@@ -251,7 +317,7 @@ export default function LoginPage() {
           {combinedPasskeyError && (
             <div
               aria-live="polite"
-              className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-md p-3"
+              className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900 border border-amber-200 dark:border-amber-800 rounded-md p-3"
             >
               {combinedPasskeyError}
             </div>
@@ -260,6 +326,25 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+function serializeAssertionResponse(credential: PublicKeyCredential) {
+  const response = credential.response as AuthenticatorAssertionResponse;
+  return {
+    id: credential.id,
+    rawId: bufferToBase64URL(credential.rawId),
+    type: credential.type,
+    response: {
+      clientDataJSON: bufferToBase64URL(response.clientDataJSON),
+      authenticatorData: bufferToBase64URL(response.authenticatorData),
+      signature: bufferToBase64URL(response.signature),
+      userHandle: bufferSourceToBase64URL(response.userHandle),
+    },
+    clientExtensionResults:
+      typeof credential.getClientExtensionResults === "function"
+        ? credential.getClientExtensionResults()
+        : {},
+  };
 }
 
 function normalizePublicKeyRequest(publicKey: any) {
@@ -285,4 +370,22 @@ function decodeBase64URL(value: string) {
   const pad = value.length % 4 ? 4 - (value.length % 4) : 0;
   const base64 = (value + "=".repeat(pad)).replace(/-/g, "+").replace(/_/g, "/");
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+function bufferToBase64URL(buffer: ArrayBuffer | ArrayBufferLike) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function bufferSourceToBase64URL(buffer?: ArrayBuffer | ArrayBufferView | null) {
+  if (!buffer) return undefined;
+  if (buffer instanceof ArrayBuffer) {
+    return bufferToBase64URL(buffer);
+  }
+  return bufferToBase64URL(buffer.buffer);
 }

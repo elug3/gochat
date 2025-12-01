@@ -100,7 +100,7 @@ export default function RegisterPage() {
                 </div>
               </div>
               {fetcher.data?.error && (
-                <div role="alert" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3">
+                <div role="alert" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-800 rounded-md p-3">
                     <p>{fetcher.data.error}</p>
                 </div>
               )}
