@@ -23,6 +23,10 @@ type Options struct {
 
 	NatsUrl  string
 	NoEvents bool
+
+	RPDisplayName string
+	RPID          string
+	RPOrigins     []string
 }
 
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
@@ -76,6 +80,24 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 		opts.UseTmpKey = true
 	} else {
 		log.Info().Msg("using provided key path")
+	}
+
+	if envVar, ok := os.LookupEnv("WEBAUTHN_RP_DISPLAY_NAME"); ok {
+		opts.RPDisplayName = envVar
+	} else {
+		opts.RPDisplayName = "GoChat"
+	}
+
+	if envVar, ok := os.LookupEnv("WEBAUTHN_RPID"); ok {
+		opts.RPID = envVar
+	} else {
+		opts.RPID = "localhost"
+	}
+
+	if envVar, ok := os.LookupEnv("WEBAUTHN_RP_ORIGINS"); ok {
+		opts.RPOrigins = []string{envVar}
+	} else {
+		opts.RPOrigins = []string{"http://localhost:5173"}
 	}
 
 	return &opts, nil

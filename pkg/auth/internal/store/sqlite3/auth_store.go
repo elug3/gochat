@@ -241,7 +241,7 @@ func (store *AuthStore) UpdateWebAuthnCredentialAfterLogin(ctx context.Context, 
 
 	_, err = tx.ExecContext(ctx, `
 	UPDATE webauthn_credentials
-	SET credential_data = ?, updated_at = CURRENT_TIMESTAMP
+	SET credential_data = ?, last_used_at = CURRENT_TIMESTAMP
 	WHERE user_id = ?;
 	`, data, userId)
 	if err != nil {

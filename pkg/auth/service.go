@@ -98,9 +98,9 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 	}
 
 	wAuth, err := webauthn.New(&webauthn.Config{
-		RPDisplayName: "GoChat",                     // Display Name for your site
-		RPID:          "localhost",                  // Generally the domain name for your site
-		RPOrigins:     []string{"http://localhost"}, // The origin URL for WebAuthn requests
+		RPDisplayName: opts.RPDisplayName, // Display Name for your site
+		RPID:          opts.RPID,          // Generally the domain name for your site
+		RPOrigins:     opts.RPOrigins,     // The origin URL for WebAuthn requests
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create webauthn instance: %w", err)

@@ -56,21 +56,23 @@
             ]
         },
         {
-            "endpoint": "/webauthn/register/start",
-            "method": "GET",
+            "endpoint": "/webauthn/register/begin",
+            "method": "POST",
             "output_encoding": "no-op",
+            "input_headers": ["Authorization"],
             "backend": [
                 {
-                    "method": "GET",
-                    "url_pattern": "/webauthn/register/start",
+                    "method": "POST",
+                    "url_pattern": "/webauthn/register/begin",
+                    "input_headers": ["Authorization"],
                     "host": ["auth:8080"]
                 }
             ],
             "extra_config": {
                 "security/cors": {
                     "options_passthrough": true,
-                    "allow_methods": ["GET", "OPTIONS"],
-                    "options_success_status": 204
+                    "allow_methods": ["POST", "OPTIONS"],
+                    "options_success_status": 200
                 }
             }
         },
@@ -78,22 +80,24 @@
             "endpoint": "/webauthn/register/finish",
             "method": "POST",
             "output_encoding": "no-op",
+            "input_headers": ["Authorization"],
             "backend": [
                 {
                     "method": "POST",
+                    "input_headers": ["Authorization"],
                     "url_pattern": "/webauthn/register/finish",
                     "host": ["auth:8080"]
                 }
             ]
-        }, 
+        },
         {
-            "endpoint": "/webauthn/login/start",
+            "endpoint": "/webauthn/login/begin",
             "method": "POST",
             "output_encoding": "no-op",
             "backend": [
                 {
                     "method": "POST",
-                    "url_pattern": "/webauthn/login/start",
+                    "url_pattern": "/webauthn/login/begin",
                     "host": ["auth:8080"]
                 }
             ]
@@ -106,6 +110,20 @@
                 {
                     "method": "POST",
                     "url_pattern": "/webauthn/login/finish",
+                    "host": ["auth:8080"]
+                }
+            ]
+        },
+        {
+            "endpoint": "/webauthn/passkeys",
+            "method": "GET",
+            "output_encoding": "no-op",
+            "input_headers": ["Authorization"],
+            "backend": [
+                {
+                    "method": "GET",
+                    "input_headers": ["Authorization"],
+                    "url_pattern": "/webauthn/passkeys",
                     "host": ["auth:8080"]
                 }
             ]
