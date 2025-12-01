@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
@@ -54,6 +55,16 @@ func NewContactsService(opts *Options) (*ContactsService, error) {
 	return &s, nil
 }
 
+func (s *ContactsService) publish(event events.Event, msg string, args ...interface{}) {
+	if s.pub == nil {
+		return
+	}
+
+	if err := s.pub.Publish(event); err != nil {
+		log.Err(err).Msgf(msg, args...)
+	}
+}
+
 func (s *ContactsService) GetGroup(groupId int) (*model.Group, error) {
 	txc, err := s.store.Begin()
 	if err != nil {
@@ -101,22 +112,17 @@ func (s *ContactsService) CreateUserGroup(userId int32, groupName string) (*mode
 		return nil, err
 	}
 
-	if s.pub != nil {
-		if err = s.pub.Publish(events.GroupCreated{
-			GroupId:   g.Id,
-			GroupName: g.Name,
-			TimeStamp: g.CreatedAt.Unix(),
-		}); err != nil {
-			log.Err(err).Msgf("cannot publish GroupCreated event for group '%d'", g.Id)
-		}
-		if err = s.pub.Publish(events.MemberJoined{
-			GroupId:   g.Id,
-			UserId:    userId,
-			TimeStamp: g.CreatedAt.Unix(),
-		}); err != nil {
-			log.Err(err).Msgf("cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
-		}
-	}
+	s.publish(events.GroupCreated{
+		GroupId:   g.Id,
+		GroupName: g.Name,
+		TimeStamp: g.CreatedAt.Unix(),
+	}, "cannot publish GroupCreated event for group '%d'", g.Id)
+
+	s.publish(events.MemberJoined{
+		GroupId:   g.Id,
+		UserId:    userId,
+		TimeStamp: g.CreatedAt.Unix(),
+	}, "cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
 
 	return g, nil
 }
@@ -176,6 +182,12 @@ func (s *ContactsService) DeleteUserGroup(groupId int, userId int32) error {
 	if err = txc.Commit(); err != nil {
 		return err
 	}
+
+	s.publish(events.GroupDeleted{
+		GroupId:   groupId,
+		TimeStamp: time.Now().Unix(),
+	}, "cannot publish GroupDeleted event for group '%d'", groupId)
+
 	return nil
 }
 
@@ -209,6 +221,13 @@ func (s *ContactsService) Invite(groupId int, inviterId int32, inviteeId int32) 
 	if err = txc.Commit(); err != nil {
 		return nil, err
 	}
+
+	s.publish(events.MemberJoined{
+		GroupId:   groupId,
+		UserId:    inviteeId,
+		TimeStamp: member.CreatedAt.Unix(),
+	}, "cannot publish MemberJoined event for user '%d' in group '%d'", inviteeId, groupId)
+
 	return member, nil
 }
 
@@ -286,6 +305,13 @@ func (s *ContactsService) DeleteMember(groupId int, userId int32, targetId int32
 	if err = txc.Commit(); err != nil {
 		return err
 	}
+
+	s.publish(events.MemberLeft{
+		GroupId:   groupId,
+		UserId:    targetId,
+		TimeStamp: time.Now().Unix(),
+	}, "cannot publish MemberLeft event for user '%d' in group '%d'", targetId, groupId)
+
 	return nil
 }
 
@@ -346,7 +372,9 @@ func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name 
 	if s.iconStore != nil {
 		iconUrl, err = s.genNewIcon(ctx, userId)
 		if err != nil {
-			return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
+			iconUrl = ""
+			log.Warn().Err(err).Msgf("cannot generate icon for user '%d', proceeding without icon", userId)
+			// return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
 		}
 	} else {
 		iconUrl = ""

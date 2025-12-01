@@ -278,10 +278,15 @@ func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, contact)
 }
 
+func (h *ContactsHandler) HandleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 	router.GET("/groups", h.HandleListGroups)
 	router.GET("/groups/:group_id", h.HandleGetGroup)
+	router.GET("/health", h.HandleHealth)
 
 	router.GET("/can", h.HandleAccess)
 
