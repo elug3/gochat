@@ -1,10 +1,12 @@
 package contacts
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
+	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,9 +18,8 @@ type ContactsHandler struct {
 func (h *ContactsHandler) HandleListGroups(c *gin.Context) {
 	groups, err := h.contacts.ListGroups()
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
-
 	}
 	c.IndentedJSON(http.StatusOK, groups)
 }
@@ -31,7 +32,7 @@ func (h *ContactsHandler) HandleGetGroup(c *gin.Context) {
 	}
 	g, err := h.contacts.GetGroup(groupId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "group not found"})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, g)
@@ -50,7 +51,7 @@ func (h *ContactsHandler) HandleGetUserGroup(c *gin.Context) {
 	}
 	g, err := h.contacts.GetUserGroup(groupId, userId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, g)
@@ -64,7 +65,7 @@ func (h *ContactsHandler) HandleListUserGroup(c *gin.Context) {
 	}
 	gs, err := h.contacts.ListUserGroups(userId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, gs)
@@ -86,7 +87,7 @@ func (h *ContactsHandler) HandleCreateUserGroup(c *gin.Context) {
 
 	g, err := h.contacts.CreateUserGroup(userId, req.Name)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, g)
@@ -104,7 +105,7 @@ func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
 
 	p, err := h.contacts.CreateProfile(c.Request.Context(), req.UserId, req.Name)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, p)
@@ -113,7 +114,7 @@ func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
 func (h *ContactsHandler) HandleListProfiles(c *gin.Context) {
 	profiles, err := h.contacts.ListProfiles(50)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, profiles)
@@ -125,7 +126,7 @@ func (h *ContactsHandler) HandleDeleteProfile(c *gin.Context) {
 		return
 	}
 	if err := h.contacts.DeleteProfile(userId); err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -145,7 +146,7 @@ func (h *ContactsHandler) HandleListGroupMembers(c *gin.Context) {
 
 	ms, err := h.contacts.ListGroupMembers(gid, uid)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, ms)
@@ -171,7 +172,7 @@ func (h *ContactsHandler) HandleInviteGroupMember(c *gin.Context) {
 	}
 	m, err := h.contacts.Invite(gid, uid, req.UserId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, m)
@@ -194,7 +195,7 @@ func (h *ContactsHandler) HandleRemoveGroupMember(c *gin.Context) {
 		return
 	}
 	if err := h.contacts.DeleteMember(gid, uid, mid); err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -237,7 +238,7 @@ func (h *ContactsHandler) HandleGetProfile(c *gin.Context) {
 	}
 	p, err := h.contacts.GetProfile(userId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "profile not found"})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, p)
@@ -251,7 +252,7 @@ func (h *ContactsHandler) HandleListContacts(c *gin.Context) {
 	}
 	contacts, err := h.contacts.ListUserContacts(userId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, contacts)
@@ -272,7 +273,7 @@ func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
 	}
 	contact, err := h.contacts.AddToContacts(userId, req.TargetId)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.IndentedJSON(http.StatusOK, contact)
@@ -320,6 +321,24 @@ func newContactsHandler(contacts *ContactsService) *ContactsHandler {
 
 func (h *ContactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.router.ServeHTTP(w, r)
+}
+
+func respondError(c *gin.Context, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, errs.ErrPermissionDenied):
+		status = http.StatusForbidden
+	case errors.Is(err, errs.ErrNotFound),
+		errors.Is(err, errs.ErrGroupNotExists),
+		errors.Is(err, errs.ErrUserNotExists):
+		status = http.StatusNotFound
+	case errors.Is(err, errs.ErrExists):
+		status = http.StatusConflict
+	case errors.Is(err, errs.ErrSelfContact):
+		status = http.StatusBadRequest
+	}
+
+	c.IndentedJSON(status, gin.H{"error": err.Error()})
 }
 
 func parseInt32(s string) (int32, error) {

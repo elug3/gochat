@@ -7,7 +7,7 @@ import (
 
 type Options struct {
 	Host string
-	Post string
+	Port string
 
 	// directory where to save the database file
 	SaveDir string
@@ -26,12 +26,11 @@ type Options struct {
 func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	var opts Options
 
-	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Host address (default: 0.0.0.0)")
 	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Host address (default: 0.0.0.0)")
-	fs.StringVar(&opts.Post, "p", "8080", "Post number (default: 8080)")
-	fs.StringVar(&opts.Post, "post", "8080", "Post number (default: 8080)")
+	fs.StringVar(&opts.Port, "p", "8080", "Port number (default: 8080)")
+	fs.StringVar(&opts.Port, "port", "8080", "Port number (default: 8080)")
 
-	fs.StringVar(&opts.SaveDir, "d", "./", "Directory where to save the database file")
+	fs.StringVar(&opts.SaveDir, "save-dir", "./", "Directory where to save the database file")
 	fs.BoolVar(&opts.NoSave, "no-save", false, "If true, the database will not be saved to disk")
 	fs.BoolVar(&opts.NoEvent, "no-event", false, "If true, the event will not be published to NATS")
 	fs.BoolVar(&opts.NoIcons, "no-icons", false, "If true, the user icons will not be generated")

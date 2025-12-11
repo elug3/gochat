@@ -1,8 +1,8 @@
 import { Form, useFetcher, useLoaderData, useNavigation, useRevalidator, type ActionFunctionArgs } from "react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { useUser } from "~/context/user";
 import { requireAccessToken } from "~/utils/auth.server";
-import { useTheme } from "~/components/theme";
 
 
 const AUTH_URL = `http://localhost:8080`;
@@ -222,33 +222,51 @@ export default function Settings() {
         <p className="text-sm text-slate-500 dark:text-slate-400">Update your personal details and keep your account secure.</p>
       </header>
 
-      <nav aria-label="Settings sections" className="flex flex-wrap gap-3">
-        {tabList.map((tab) => {
-          const isActive = activeTab === tab;
-          const baseClasses = "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition";
-          const activeClasses = "border-blue-500 bg-blue-50 text-blue-600 shadow-sm dark:border-blue-400 dark:bg-blue-900 dark:text-blue-200";
-          const inactiveClasses = "border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-600 dark:border-slate-800 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-200";
+      <div className="flex flex-1 gap-6">
+        <nav
+          aria-label="Settings sections"
+          className="flex w-64 shrink-0 flex-col gap-2 text-sm text-slate-700 dark:text-slate-200"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+            Contents
+          </p>
+          <ul className="flex flex-col gap-1">
+            {tabList.map((tab, index) => {
+              const isActive = activeTab === tab;
+              const baseClasses =
+                "group flex w-full items-center gap-2 rounded px-2 py-1 text-left transition hover:underline";
+              const activeClasses =
+                "font-semibold text-slate-900 underline decoration-slate-400 decoration-2 underline-offset-4 dark:text-slate-50 dark:decoration-slate-500";
+              const inactiveClasses =
+                "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100";
 
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={`${baseClasses} ${isActive ? activeClasses : inactiveClasses}`}
-              aria-pressed={isActive}
-            >
-              {TAB_LABELS[tab]}
-            </button>
-          );
-        })}
-      </nav>
+              return (
+                <li key={tab}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`${baseClasses} ${isActive ? activeClasses : inactiveClasses}`}
+                    aria-pressed={isActive}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
+                      {index + 1}.
+                    </span>
+                    <span>{TAB_LABELS[tab]}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
 
-      <section className="flex-1 overflow-hidden">
-        {{
-          profile: <ProfileForm isSubmitting={isSubmitting} />,
-          security: <SecurityForm isSubmitting={isSubmitting} />
-        }[activeTab]}
-      </section>
+        <section className="flex-1 overflow-hidden">
+          {{
+            profile: <ProfileForm isSubmitting={isSubmitting} />,
+            security: <SecurityForm isSubmitting={isSubmitting} />
+          }[activeTab]}
+        </section>
+      </div>
     </div>
   );
 }
@@ -261,60 +279,71 @@ interface SettingsSectionProps {
 type SavedPasskey = PasskeyRecord;
 
 function ProfileForm({ isSubmitting }: SettingsSectionProps) {
+  const { user, profile } = useUser();
+  const userId = profile?.userId ?? (user?.id ? user.id.toString() : "Unavailable");
+  const displayName = profile?.name ?? "Unknown";
+  const [name, setName] = useState(displayName);
+
+  useEffect(() => {
+    setName(displayName);
+  }, [displayName]);
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <header className="mb-6 space-y-1">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Profile information</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Keep your personal details up to date so teammates know who they are chatting with.</p>
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Profile</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Update your personal information.</p>
       </header>
 
-      <Form method="post" className="space-y-5">
+      <Form method="post" className="space-y-6">
         <input type="hidden" name="_action" value="update-profile" />
+        <div className="rounded-lg border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200">
+          <p className="font-semibold text-slate-800 dark:text-slate-100">Signed-in account</p>
+          <p className="mt-1 text-slate-500 dark:text-slate-400">
+            These details come from your current session and are read-only here.
+          </p>
+        </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-            Display name
+            User ID
             <input
-              type="text"
-              name="displayName"
-              placeholder="Alex Johnson"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              disabled={isSubmitting}
-              required
+              value={userId}
+              readOnly
+              disabled
+              className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
+            <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+              Unique identifier for your account.
+            </span>
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-            Email address
+            Name
             <input
-              type="email"
-              name="email"
-              placeholder="alex@email.com"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              name="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               disabled={isSubmitting}
               required
             />
+            <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+              How other people see you in chats and contacts.
+            </span>
           </label>
         </div>
 
-        <label className="flex flex-col gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-          Bio
-          <textarea
-            name="bio"
-            rows={4}
-            placeholder="Share a short description about yourself or your role."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            disabled={isSubmitting}
-          />
-        </label>
-
         <div className="flex items-center justify-end gap-2">
+          <p className="flex-1 text-xs text-slate-500 dark:text-slate-400">
+            {isSubmitting ? "Saving your profile..." : "Profile values refresh automatically when your account info updates."}
+          </p>
           <button
             type="submit"
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-100"
             disabled={isSubmitting}
           >
-            Save profile
+            {isSubmitting ? "Saving..." : "Save changes"}
           </button>
         </div>
       </Form>

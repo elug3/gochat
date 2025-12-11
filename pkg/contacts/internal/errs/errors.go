@@ -8,4 +8,5 @@ var (
 	ErrUserNotExists    = errors.New("user not exists")
 	ErrExists           = errors.New("already exists")
 	ErrPermissionDenied = errors.New("permission denied")
+	ErrSelfContact      = errors.New("cannot add self to contacts")
 )

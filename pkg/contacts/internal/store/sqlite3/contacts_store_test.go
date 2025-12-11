@@ -181,8 +181,8 @@ func TestDeleteProfile(t *testing.T) {
 
 		nonExistentUserId := int32(0)
 		err = txc.DeleteProfile(nonExistentUserId)
-		if err != nil {
-			t.Fatalf("failed to delete non-existing profile: %v", err)
+		if !errors.Is(err, errs.ErrUserNotExists) {
+			t.Fatalf("expected ErrUserNotExists for missing profile, got %v", err)
 		}
 	})
 }

@@ -15,6 +15,9 @@ func TestCan(t *testing.T) {
 		{RoleMember, RoleMember, ActionRead, true},
 		{RoleOwner, RoleOwner, ActionLeave, false},
 		{RoleOwner, RoleOwner, ActionDeleteGroup, true},
+		{RoleManager, RoleOwner, ActionDeleteMember, false},
+		{RoleOwner, RoleManager, ActionDeleteMember, true},
+		{RoleOwner, RoleOwner, ActionDeleteMember, false},
 	}
 
 	for _, tc := range testCases {

@@ -2,6 +2,7 @@ package contacts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -204,7 +205,7 @@ func (s *ContactsService) Invite(groupId int, inviterId int32, inviteeId int32) 
 	if err != nil {
 		return nil, fmt.Errorf("Begin: %w", err)
 	}
-	defer txc.Commit()
+	defer txc.Rollback()
 
 	if ok, err := s.CanInvite(groupId, inviterId); err != nil || !ok {
 		if err != nil {
@@ -448,6 +449,10 @@ func (s *ContactsService) ListUserContacts(userId int32) ([]model.Contact, error
 }
 
 func (s *ContactsService) AddToContacts(ownerId int32, targetId int32) (*model.Contact, error) {
+	if ownerId == targetId {
+		return nil, fmt.Errorf("cannot add self to contacts: %w", errs.ErrSelfContact)
+	}
+
 	txc, err := s.store.Begin()
 	if err != nil {
 		return nil, err
@@ -474,7 +479,10 @@ func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) 
 
 	m, err := txc.GetMember(groupId, inviterId)
 	if err != nil {
-		return false, nil
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
+		}
+		return false, err
 	}
 
 	if access.Can(m.Role, m.Role, access.ActionInvite) {
@@ -513,6 +521,9 @@ func (s *ContactsService) CanRead(groupId int, userId int32) (bool, error) {
 
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
+		}
 		return false, err
 	}
 	if access.Can(m.Role, m.Role, access.ActionRead) {
@@ -530,6 +541,9 @@ func (s *ContactsService) CanLeave(groupId int, userId int32) (bool, error) {
 
 	m, err := txc.GetMember(groupId, userId)
 	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
+		}
 		return false, err
 	}
 
@@ -546,15 +560,26 @@ func (s *ContactsService) CanDeleteMember(groupId int, userId int32, targetId in
 	}
 	defer txc.Rollback()
 
-	m, err := txc.GetMember(groupId, userId)
+	actor, err := txc.GetMember(groupId, userId)
 	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
+		}
 		return false, err
 	}
 
-	if access.Can(m.Role, m.Role, access.ActionDeleteMember) {
+	target, err := txc.GetMember(groupId, targetId)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, fmt.Errorf("target user '%d' is not a member of group '%d': %w", targetId, groupId, errs.ErrNotFound)
+		}
+		return false, err
+	}
+
+	if access.Can(actor.Role, target.Role, access.ActionDeleteMember) {
 		return true, nil
 	}
-	return false, nil
+	return false, fmt.Errorf("user '%d' cannot delete member '%d' in group '%d': %w", userId, targetId, groupId, errs.ErrPermissionDenied)
 }
 
 type AccessRequest struct {
@@ -574,7 +599,7 @@ func (s *ContactsService) Can(req AccessRequest) (bool, access.Action, error) {
 
 	switch req.Action {
 	case access.ActionInvite:
-		can, err = s.CanInvite(req.ChatId, req.TargetId)
+		can, err = s.CanInvite(req.ChatId, req.UserId)
 	case access.ActionSend:
 		can, err = s.CanSend(req.ChatId, req.UserId)
 	case access.ActionRead:

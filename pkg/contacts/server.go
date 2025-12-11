@@ -6,7 +6,7 @@ import (
 )
 
 func NewHttpServer(opts *Options) (*http.Server, error) {
-	addr := net.JoinHostPort(opts.Host, opts.Post)
+	addr := net.JoinHostPort(opts.Host, opts.Port)
 	s, err := NewContactsService(opts)
 	if err != nil {
 		return nil, err

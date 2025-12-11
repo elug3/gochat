@@ -29,10 +29,15 @@ func NewMessageStore(saveDir string, noSave bool) (*MessageStore, error) {
 type TxKey struct{}
 
 func (store *MessageStore) WithContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	tx, _ := store.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return ctx, func() {}
+	}
 
-	ctx, cancel := context.WithCancel(ctx)
 	ctx = context.WithValue(ctx, TxKey{}, tx)
+	cancel := func() {
+		_ = tx.Rollback()
+	}
 	return ctx, cancel
 }
 
@@ -49,7 +54,6 @@ func (s *MessageStore) CreateMessage(ctx context.Context, chatId int, userId int
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
 
 	var msg model.Message
 	err = tx.QueryRow(`
@@ -58,9 +62,11 @@ func (s *MessageStore) CreateMessage(ctx context.Context, chatId int, userId int
 	RETURNING id, chat_id, sender, content, sent_at;
 	`, chatId, userId, content).Scan(&msg.Id, &msg.ChatId, &msg.Sender, &msg.Content, &msg.SentAt)
 	if err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("scan: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return &msg, nil
@@ -78,6 +84,7 @@ func (s *MessageStore) ListMessages(ctx context.Context, chatId int, options *st
 	LIMIT ? OFFSET ?;
 	`, chatId, options.Limit, options.Offset)
 	if err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
@@ -86,12 +93,18 @@ func (s *MessageStore) ListMessages(ctx context.Context, chatId int, options *st
 	for rows.Next() {
 		var msg model.Message
 		if err := rows.Scan(&msg.Id, &msg.ChatId, &msg.Sender, &msg.Content, &msg.SentAt); err != nil {
+			_ = tx.Rollback()
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		messages = append(messages, msg)
 	}
 	if err := rows.Err(); err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return messages, nil
 }
@@ -103,14 +116,21 @@ func (s *MessageStore) DeleteMessage(ctx context.Context, messageId int) error {
 	}
 	result, err := tx.Exec(`DELETE FROM message WHERE id = ?`, messageId)
 	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("delete message: %w", err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("get rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
+		_ = tx.Rollback()
 		return fmt.Errorf("no message found with id: %d", messageId)
+	}
+	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }

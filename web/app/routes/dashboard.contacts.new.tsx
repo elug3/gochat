@@ -9,14 +9,19 @@ type ActionResponse = {
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResponse> {
 	const formData = await request.formData();
-	const identifier = formData.get("identifier");
+	const rawUserId = formData.get("userId");
 
-	if (typeof identifier !== "string" || identifier.trim().length === 0) {
-		return { ok: false, error: "Please enter a username or email" };
+	if (typeof rawUserId !== "string" || rawUserId.trim().length === 0) {
+		return { ok: false, error: "Please enter a user id" };
+	}
+
+	const parsedUserId = Number.parseInt(rawUserId.trim(), 10);
+	if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
+		return { ok: false, error: "User id must be a positive number" };
 	}
 
 	try {
-		await sendContactRequest(request, identifier.trim());
+		await sendContactRequest(request, parsedUserId.toString());
 		return { ok: true };
 	} catch (err: any) {
 		return { ok: false, error: err.message ?? "Failed to send contact request" };
@@ -42,25 +47,27 @@ export default function NewContactRoute() {
 		<div className="card">
 			<h3 className="text-lg font-semibold mb-2 text-center text-slate-900 dark:text-slate-100">Add a new contact</h3>
 			<p className="text-sm text-slate-600 dark:text-slate-400 mb-6 text-center">
-				Send a contact request by entering their username or email address.
+				Send a contact request by entering their user id.
 			</p>
 
-					<Form
-						method="post"
-						replace
-						ref={formRef}
-						className="space-y-4"
-					>
+			<Form
+				method="post"
+				replace
+				ref={formRef}
+				className="space-y-4"
+			>
 				<div>
-					<label htmlFor="identifier" className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
-						Username or email
+					<label htmlFor="userId" className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+						User ID
 					</label>
 					<input
-						id="identifier"
-						name="identifier"
-						type="text"
+						id="userId"
+						name="userId"
+						type="number"
+						inputMode="numeric"
+						pattern="[0-9]*"
 						ref={inputRef}
-						placeholder="jane@example.com"
+						placeholder="12345"
 						className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
 						disabled={isSubmitting}
 						required
@@ -84,7 +91,7 @@ export default function NewContactRoute() {
 					disabled={isSubmitting}
 					className="w-full bg-blue-500 dark:bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
 				>
-					{isSubmitting ? "Sending..." : "Send Request"}
+					{isSubmitting ? "Sending..." : "Add contact"}
 				</button>
 			</Form>
 		</div>

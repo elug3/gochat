@@ -196,6 +196,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 
 	pw, err := s.store.GetPasswordByUsername(ctx, tx, username)
 	if err != nil {
@@ -214,6 +215,10 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 	}
 
 	// TODO: publish event
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
 
 	return token, nil
 }

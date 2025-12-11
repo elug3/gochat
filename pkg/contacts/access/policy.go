@@ -39,6 +39,10 @@ var Policies = map[Role]map[Action]Policy{
 	RoleOwner: {
 		ActionLeave:       {allow: false},
 		ActionDeleteGroup: {allow: true},
+		ActionDeleteMember: {
+			allow:  true,
+			target: RoleManager, // owners can remove managers and members, but not other owners
+		},
 	},
 }
 
@@ -89,6 +93,23 @@ func Can(act, tgt Role, action Action) bool {
 	if !ok {
 		return false
 	}
-	return p.allow
-	// return p.allow && p.target == tgt
+	if !p.allow {
+		return false
+	}
+	if p.target == "" {
+		return true
+	}
+	return canTarget(tgt, p.target)
+}
+
+// canTarget returns true when the target's role is at or below the allowed target role
+// in the hierarchy (e.g. owners can target managers and members, managers can only
+// target members).
+func canTarget(target Role, max Role) bool {
+	for _, allowed := range gaterRoles(max) {
+		if allowed == target {
+			return true
+		}
+	}
+	return false
 }

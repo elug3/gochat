@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
@@ -425,13 +426,17 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 	row := txc.tx.QueryRow(`
 	INSERT INTO contacts (owner_id, target_id, alias)
 	VALUES (?, ?, ?)
-	RETURNING target_id, (SELECT name FROM profile WHERE user_id = target_id), COALESCE(alias, ''), created_at;
+	RETURNING target_id, (SELECT name FROM profile WHERE user_id = target_id), alias, created_at;
 	`, ownerId, targetId, alias)
 
-	var contact model.Contact
-	if err := row.Scan(&contact.ProfileId, &contact.Name, &contact.Alias, &contact.CreatedAt); err != nil {
+	var (
+		contact model.Contact
+		dbAlias sql.NullString
+	)
+	if err := row.Scan(&contact.ProfileId, &contact.Name, &dbAlias, &contact.CreatedAt); err != nil {
 		return nil, err
 	}
+	contact.Alias = nullStringPtr(dbAlias)
 	return &contact, nil
 }
 
@@ -456,10 +461,14 @@ func (txc *TxContacts) ListUserContacts(userId int32) ([]model.Contact, error) {
 
 	contacts := make([]model.Contact, 0)
 	for rows.Next() {
-		var contact model.Contact
-		if err = rows.Scan(&contact.ProfileId, &contact.Name, &contact.Alias, &contact.CreatedAt); err != nil {
+		var (
+			contact model.Contact
+			alias   sql.NullString
+		)
+		if err = rows.Scan(&contact.ProfileId, &contact.Name, &alias, &contact.CreatedAt); err != nil {
 			return nil, err
 		}
+		contact.Alias = nullStringPtr(alias)
 		contacts = append(contacts, contact)
 	}
 	if err = rows.Err(); err != nil {
@@ -534,11 +543,22 @@ func wrapErr(err error) error {
 	return err
 }
 
+func nullStringPtr(ns sql.NullString) *string {
+	if ns.Valid {
+		return &ns.String
+	}
+	return nil
+}
+
 func openDB(saveDir string, inMemory bool) (*sql.DB, error) {
 	if inMemory {
-		return sql.Open("sqlite3", ":memory:")
+		db, err := sql.Open("sqlite3", "file:contacts_memdb?mode=memory&cache=shared")
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
 	}
-	path := saveDir + "/contacts.db"
+	path := filepath.Join(saveDir, "contacts.db")
 	return sql.Open("sqlite3", path)
 }
 
