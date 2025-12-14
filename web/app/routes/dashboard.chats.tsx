@@ -204,7 +204,7 @@ export default function Chats() {
   }, [loaderData, setChats]);
 
   return (
-    <div className="page">
+    <div className="page h-full">
         <Sidebar />
 
         {/* content */}
