@@ -1,19 +1,19 @@
 package sqlite3_test
 
 import (
+	"database/sql"
 	"errors"
 	"sync/atomic"
 	"testing"
 
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
-	"github.com/elug3/gochat/pkg/contacts/internal/store"
 	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 )
 
 func NewTestContactsStore(t *testing.T) *sqlite3.ContactsStore {
 	t.Helper()
-	store, err := sqlite3.NewContactsStore("", true)
+	store, _, err := sqlite3.NewContactsStore("", true)
 	if err != nil {
 		t.Fatalf("failed to create ContactsStore: %v", err)
 	}
@@ -25,14 +25,14 @@ func TestProfileCRUD(t *testing.T) {
 
 	userId := int32(1)
 
-	txc, err := store.Begin()
+	tx, err := store.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
 	// Test CreateProfile
-	createdProfile, err := txc.CreateProfile(userId, "test profile", "")
+	createdProfile, err := store.CreateProfile(tx, userId, "test profile", "")
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestProfileCRUD(t *testing.T) {
 	}
 
 	// Test GetProfile
-	fetchedProfile, err := txc.GetProfile(userId)
+	fetchedProfile, err := store.GetProfile(tx, userId)
 	if err != nil {
 		t.Errorf("failed to get profile: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestProfileCRUD(t *testing.T) {
 
 	// Test Update Profile
 	updatedName := "updated profile"
-	updatedProfile, err := txc.UpdateProfile(userId, updatedName, "")
+	updatedProfile, err := store.UpdateProfile(tx, userId, updatedName, "")
 	if err != nil {
 		t.Errorf("failed to update profile: %v", err)
 	}
@@ -66,12 +66,12 @@ func TestProfileCRUD(t *testing.T) {
 	}
 
 	// Test DeleteProfile
-	err = txc.DeleteProfile(userId)
+	err = store.DeleteProfile(tx, userId)
 	if err != nil {
 		t.Errorf("failed to delete profile: %v", err)
 	}
 
-	_, err = txc.GetProfile(userId)
+	_, err = store.GetProfile(tx, userId)
 	if err == nil {
 		t.Errorf("expected error when fetching deleted profile, got none")
 	}
@@ -80,17 +80,17 @@ func TestProfileCRUD(t *testing.T) {
 func TestContactCRUD(t *testing.T) {
 	store := NewTestContactsStore(t)
 
-	txc, err := store.Begin()
+	tx, err := store.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	user := generateTestProfile(t, txc)
-	friend := generateTestProfile(t, txc)
+	user := generateTestProfile(t, store, tx)
+	friend := generateTestProfile(t, store, tx)
 
 	// create contact
-	createdContact, err := txc.CreateContact(user.Id, friend.Id, nil)
+	createdContact, err := store.CreateContact(tx, user.Id, friend.Id, nil)
 	if err != nil {
 		t.Fatalf("failed to create contact: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestContactCRUD(t *testing.T) {
 	// TODO: add update contact
 
 	// list contacts
-	contacts, err := txc.ListUserContacts(user.Id)
+	contacts, err := store.ListUserContacts(tx, user.Id)
 	if err != nil {
 		t.Errorf("failed to list contacts: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestContactCRUD(t *testing.T) {
 	}
 
 	// delete contact
-	if err = txc.DeleteUserContact(user.Id, friend.Id); err != nil {
+	if err = store.DeleteUserContact(tx, user.Id, friend.Id); err != nil {
 		t.Errorf("failed to delete contact: %s", err)
 	}
 }
@@ -124,10 +124,10 @@ func generateTestUserId() int32 {
 	return atomic.AddInt32(&testUserIdCount, 1)
 }
 
-func generateTestProfile(t *testing.T, txc store.TxContacts) *model.Profile {
+func generateTestProfile(t *testing.T, store *sqlite3.ContactsStore, tx *sql.Tx) *model.Profile {
 	t.Helper()
 
-	p, err := txc.CreateProfile(generateTestUserId(), "Test User", "")
+	p, err := store.CreateProfile(tx, generateTestUserId(), "Test User", "")
 	if err != nil {
 		t.Fatalf("failed to create test profile: %v", err)
 	}
@@ -138,9 +138,9 @@ func generateTestProfile(t *testing.T, txc store.TxContacts) *model.Profile {
 func generateTestGroup() {
 }
 
-func checkProfileExists(t *testing.T, txc store.TxContacts, userId int32) error {
+func checkProfileExists(t *testing.T, store *sqlite3.ContactsStore, tx *sql.Tx, userId int32) error {
 	t.Helper()
-	_, err := txc.GetProfile(userId)
+	_, err := store.GetProfile(tx, userId)
 	if err != nil {
 		return err
 	}
@@ -152,20 +152,20 @@ func TestDeleteProfile(t *testing.T) {
 	t.Run("delete existing profile", func(t *testing.T) {
 		store := NewTestContactsStore(t)
 
-		txc, err := store.Begin()
+		tx, err := store.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
 		}
-		defer txc.Rollback()
+		defer tx.Rollback()
 
-		createdProfile := generateTestProfile(t, txc)
+		createdProfile := generateTestProfile(t, store, tx)
 
-		err = txc.DeleteProfile(createdProfile.Id)
+		err = store.DeleteProfile(tx, createdProfile.Id)
 		if err != nil {
 			t.Fatalf("failed to delete profile: %v", err)
 		}
 
-		if err := checkProfileExists(t, txc, createdProfile.Id); !errors.Is(err, errs.ErrNotFound) {
+		if err := checkProfileExists(t, store, tx, createdProfile.Id); !errors.Is(err, errs.ErrNotFound) {
 			t.Errorf("expected profile to be deleted, but it still exists")
 		}
 	})
@@ -173,14 +173,14 @@ func TestDeleteProfile(t *testing.T) {
 	t.Run("delete non-existing profile", func(t *testing.T) {
 		store := NewTestContactsStore(t)
 
-		txc, err := store.Begin()
+		tx, err := store.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
 		}
-		defer txc.Rollback()
+		defer tx.Rollback()
 
 		nonExistentUserId := int32(0)
-		err = txc.DeleteProfile(nonExistentUserId)
+		err = store.DeleteProfile(tx, nonExistentUserId)
 		if !errors.Is(err, errs.ErrUserNotExists) {
 			t.Fatalf("expected ErrUserNotExists for missing profile, got %v", err)
 		}

@@ -2,15 +2,16 @@ package contacts
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
-	"github.com/elug3/gochat/pkg/contacts/internal/store"
 	"github.com/elug3/gochat/pkg/contacts/internal/store/s3"
 	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
@@ -18,18 +19,28 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	// DefaultListLimit is the default limit for list operations
+	DefaultListLimit = 50
+	// MaxListLimit is the maximum allowed limit for list operations
+	MaxListLimit = 1000
+)
+
 type ContactsService struct {
-	store     store.ContactsStore
-	pub       *events.Publisher
-	iconStore *s3.IconStore
+	store       *sqlite3.ContactsStore
+	pub         *events.Publisher
+	iconStore   *s3.IconStore
+	iconBaseURL string
 }
+
+var contactsResetOnce sync.Once
 
 func NewContactsService(opts *Options) (*ContactsService, error) {
 	var (
 		pub       *events.Publisher
 		iconStore *s3.IconStore
 	)
-	contactsStore, err := sqlite3.NewContactsStore(opts.SaveDir, opts.NoSave)
+	contactsStore, isNewStore, err := sqlite3.NewContactsStore(opts.SaveDir, opts.NoSave)
 	if err != nil {
 		return nil, err
 	}
@@ -42,16 +53,23 @@ func NewContactsService(opts *Options) (*ContactsService, error) {
 	}
 
 	if !opts.NoIcons {
-		iconStore, err = s3.NewIconStore(opts.S3Endpoint)
+		iconStore, err = s3.NewIconStore(opts.S3Endpoint, opts.S3AccessKey, opts.S3SecretKey, opts.S3Region)
 		if err != nil {
 			return nil, fmt.Errorf("cannot create s3 icon store: %w", err)
 		}
 	}
 
 	s := ContactsService{
-		store:     contactsStore,
-		iconStore: iconStore,
-		pub:       pub,
+		store:       contactsStore,
+		iconStore:   iconStore,
+		pub:         pub,
+		iconBaseURL: opts.IconBaseURL,
+	}
+
+	// if isNewStore, publish reset event
+	if isNewStore {
+		log.Info().Msg("new contacts store created")
+		s.publishResetEvent()
 	}
 	return &s, nil
 }
@@ -66,51 +84,68 @@ func (s *ContactsService) publish(event events.Event, msg string, args ...interf
 	}
 }
 
-func (s *ContactsService) GetGroup(groupId int) (*model.Group, error) {
-	txc, err := s.store.Begin()
-	if err != nil {
-		return nil, err
+func (s *ContactsService) publishResetEvent() {
+	if s.pub == nil {
+		return
 	}
-	defer txc.Rollback()
 
-	group, err := txc.GetGroup(groupId)
+	contactsResetOnce.Do(func() {
+		s.publish(events.ContactsReset{
+			TimeStamp: time.Now().Unix(),
+		}, "cannot publish ContactsReset event after initialization")
+	})
+}
+
+func (s *ContactsService) GetGroup(ctx context.Context, groupId int) (*model.Group, error) {
+	tx, err := s.store.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	group, err := s.store.GetGroup(tx, groupId)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get group '%d': %w", groupId, err)
 	}
 	return group, nil
 }
 
-func (s *ContactsService) ListGroups() ([]model.Group, error) {
-	txc, err := s.store.Begin()
-	if err != nil {
-		return nil, err
+func (s *ContactsService) ListGroups(ctx context.Context, limit int) ([]model.Group, error) {
+	if limit <= 0 || limit > MaxListLimit {
+		limit = DefaultListLimit
 	}
-	defer txc.Rollback()
 
-	gs, err := txc.ListGroups(50)
+	tx, err := s.store.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	gs, err := s.store.ListGroups(tx, limit)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list groups: %w", err)
 	}
 	return gs, nil
 }
 
-func (s *ContactsService) CreateUserGroup(userId int32, groupName string) (*model.Group, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CreateUserGroup(ctx context.Context, userId int32, groupName string) (*model.Group, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
 
-	g, err := txc.CreateGroup(groupName)
+	defer tx.Rollback()
+
+	g, err := s.store.CreateGroup(tx, groupName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create group '%s': %w", groupName, err)
 
 	}
-	if _, err = s.join(txc, g.Id, userId, access.RoleOwner); err != nil {
+	if _, err = s.join(tx, g.Id, userId, access.RoleOwner); err != nil {
 		return nil, fmt.Errorf("cannot add user '%d' to group '%d': %w", userId, g.Id, err)
 	}
-	if err = txc.Commit(); err != nil {
-		return nil, err
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	s.publish(events.GroupCreated{
@@ -128,48 +163,50 @@ func (s *ContactsService) CreateUserGroup(userId int32, groupName string) (*mode
 	return g, nil
 }
 
-func (s *ContactsService) ListUserGroups(userId int32) ([]model.Group, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) ListUserGroups(ctx context.Context, userId int32) ([]model.Group, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
-	groups, err := txc.ListUserGroups(userId)
+	defer tx.Rollback()
+
+	groups, err := s.store.ListUserGroups(tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list groups for user '%d': %w", userId, err)
 	}
 	return groups, nil
 }
 
-func (s *ContactsService) GetUserGroup(groupId int, userId int32) (*model.Group, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) GetUserGroup(ctx context.Context, groupId int, userId int32) (*model.Group, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	if exists, err := txc.MemberExists(groupId, userId); !exists {
+	if exists, err := s.store.MemberExists(tx, groupId, userId); !exists {
 		if err != nil {
 			return nil, fmt.Errorf("cannot get group '%d' for user '%d': %w", groupId, userId, err)
 		}
 		return nil, fmt.Errorf("user '%d' does not exist in group '%d'", userId, groupId)
 	}
 
-	group, err := txc.GetGroup(groupId)
+	group, err := s.store.GetGroup(tx, groupId)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get group '%d': %w", groupId, err)
 	}
 	return group, nil
 }
 
-func (s *ContactsService) DeleteUserGroup(groupId int, userId int32) error {
-	txc, err := s.store.Begin()
+func (s *ContactsService) DeleteUserGroup(ctx context.Context, groupId int, userId int32) error {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
 
-	actMbr, err := txc.GetMember(groupId, userId)
+	defer tx.Rollback()
+
+	actMbr, err := s.store.GetMember(tx, groupId, userId)
 	if err != nil {
 		return fmt.Errorf("cannot get member for user '%d' in group '%d': %w", userId, groupId, err)
 	}
@@ -177,11 +214,11 @@ func (s *ContactsService) DeleteUserGroup(groupId int, userId int32) error {
 		return fmt.Errorf("user '%d' cannot delete group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
 	}
 
-	if err = s.deleteGroup(txc, groupId); err != nil {
+	if err = s.deleteGroup(tx, groupId); err != nil {
 		return fmt.Errorf("cannot delete group '%d': %w", groupId, err)
 	}
-	if err = txc.Commit(); err != nil {
-		return err
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	s.publish(events.GroupDeleted{
@@ -192,35 +229,36 @@ func (s *ContactsService) DeleteUserGroup(groupId int, userId int32) error {
 	return nil
 }
 
-func (s *ContactsService) deleteGroup(txc store.TxContacts, id int) error {
-	err := txc.DeleteGroup(id)
+func (s *ContactsService) deleteGroup(tx *sql.Tx, id int) error {
+	err := s.store.DeleteGroup(tx, id)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *ContactsService) Invite(groupId int, inviterId int32, inviteeId int32) (*model.Member, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) Invite(ctx context.Context, groupId int, inviterId int32, inviteeId int32) (*model.Member, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("Begin: %w", err)
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
 
-	if ok, err := s.CanInvite(groupId, inviterId); err != nil || !ok {
+	defer tx.Rollback()
+
+	if ok, err := s.CanInvite(ctx, groupId, inviterId); err != nil || !ok {
 		if err != nil {
 			return nil, fmt.Errorf("failed to check permission: %w", err)
 		}
 		// permission denied
 		return nil, fmt.Errorf("user '%d' cannot invite members to group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
 	}
-	member, err := s.join(txc, groupId, inviteeId, access.RoleMember)
+	member, err := s.join(tx, groupId, inviteeId, access.RoleMember)
 	if err != nil {
 		return nil, fmt.Errorf("cannot join user '%d' to group '%d': %w", inviteeId, groupId, err)
 	}
 
-	if err = txc.Commit(); err != nil {
-		return nil, err
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	s.publish(events.MemberJoined{
@@ -232,66 +270,67 @@ func (s *ContactsService) Invite(groupId int, inviterId int32, inviteeId int32) 
 	return member, nil
 }
 
-func (s *ContactsService) join(txc store.TxContacts, groupId int, userId int32, role access.Role) (*model.Member, error) {
-	return txc.CreateMember(groupId, userId, role)
+func (s *ContactsService) join(tx *sql.Tx, groupId int, userId int32, role access.Role) (*model.Member, error) {
+	return s.store.CreateMember(tx, groupId, userId, role)
 }
 
-func (s *ContactsService) ListGroupMembers(groupId int, userId int32) ([]model.Member, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) ListGroupMembers(ctx context.Context, groupId int, userId int32) ([]model.Member, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("Begin: %w", err)
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	if exists, err := txc.MemberExists(groupId, userId); !exists {
+	if exists, err := s.store.MemberExists(tx, groupId, userId); !exists {
 		if err != nil {
-			return nil, fmt.Errorf("MemberExists: %w", err)
+			return nil, fmt.Errorf("cannot check membership: %w", err)
 		}
 		return nil, fmt.Errorf("user '%d' does not exist in group '%d'", userId, groupId)
 	}
 
-	members, err := txc.ListGroupMembers(groupId)
+	members, err := s.store.ListGroupMembers(tx, groupId)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot list group members: %w", err)
 	}
 	return members, nil
 }
 
-func (s *ContactsService) GetMember(groupId int, userId int32, targetId int32) (*model.Member, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) GetMember(ctx context.Context, groupId int, userId int32, targetId int32) (*model.Member, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("Begin: %w", err)
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	if exists, err := txc.MemberExists(groupId, userId); !exists {
+	if exists, err := s.store.MemberExists(tx, groupId, userId); !exists {
 		if err != nil {
-			return nil, fmt.Errorf("MemberExists: %w", err)
+			return nil, fmt.Errorf("cannot check membership: %w", err)
 		}
 		return nil, fmt.Errorf("user '%d' does not exist in group '%d'", userId, groupId)
 	}
 
-	m, err := txc.GetMember(groupId, targetId)
+	m, err := s.store.GetMember(tx, groupId, targetId)
 	if err != nil {
-		return nil, fmt.Errorf("GetMember: %w", err)
+		return nil, fmt.Errorf("cannot get member: %w", err)
 	}
 	return m, nil
 }
 
-func (s *ContactsService) DeleteMember(groupId int, userId int32, targetId int32) error {
-	txc, err := s.store.Begin()
+func (s *ContactsService) DeleteMember(ctx context.Context, groupId int, userId int32, targetId int32) error {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+
+	defer tx.Rollback()
 
 	if userId == targetId {
 		// A member can always leave a group by themselves. No need to check permissions. except owner.
-		if err := s.leave(txc, groupId, userId); err != nil {
+		if err := s.leave(ctx, tx, groupId, userId); err != nil {
 			return err
 		}
 	} else {
-		if ok, err := s.CanDeleteMember(groupId, userId, targetId); err != nil || !ok {
+		if ok, err := s.CanDeleteMember(ctx, groupId, userId, targetId); err != nil || !ok {
 			if err != nil {
 				return fmt.Errorf("failed to check permission: %w", err)
 			}
@@ -299,12 +338,12 @@ func (s *ContactsService) DeleteMember(groupId int, userId int32, targetId int32
 			return fmt.Errorf("cannot delete member '%d': %w", targetId, errs.ErrPermissionDenied)
 		}
 
-		if err = s.deleteMember(txc, groupId, targetId); err != nil {
+		if err = s.deleteMember(tx, groupId, targetId); err != nil {
 			return fmt.Errorf("user '%d' cannot delete member for group '%d', '%d': %w", userId, groupId, targetId, err)
 		}
 	}
-	if err = txc.Commit(); err != nil {
-		return err
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	s.publish(events.MemberLeft{
@@ -316,35 +355,39 @@ func (s *ContactsService) DeleteMember(groupId int, userId int32, targetId int32
 	return nil
 }
 
-func (s *ContactsService) leave(txc store.TxContacts, groupId int, userId int32) error {
-	if ok, err := s.CanLeave(groupId, userId); !ok {
+func (s *ContactsService) leave(ctx context.Context, tx *sql.Tx, groupId int, userId int32) error {
+	if ok, err := s.CanLeave(ctx, groupId, userId); !ok {
 		if err != nil {
 			return fmt.Errorf("failed to check permission: %w", err)
 		}
 		return fmt.Errorf("cannot leave group '%d': %w", groupId, errs.ErrPermissionDenied)
 	}
 
-	if err := txc.DeleteMember(groupId, userId); err != nil {
+	if err := s.store.DeleteMember(tx, groupId, userId); err != nil {
 		return fmt.Errorf("user '%d' cannot leave group '%d': %w", userId, groupId, err)
 	}
 	return nil
 }
 
-func (s *ContactsService) deleteMember(txc store.TxContacts, groupId int, userId int32) error {
-	if err := txc.DeleteMember(groupId, userId); err != nil {
+func (s *ContactsService) deleteMember(tx *sql.Tx, groupId int, userId int32) error {
+	if err := s.store.DeleteMember(tx, groupId, userId); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *ContactsService) ListProfiles(limit int) ([]model.Profile, error) {
-	txc, err := s.store.Begin()
-	if err != nil {
-		return nil, err
+func (s *ContactsService) ListProfiles(ctx context.Context, limit int) ([]model.Profile, error) {
+	if limit <= 0 || limit > MaxListLimit {
+		limit = DefaultListLimit
 	}
-	defer txc.Rollback()
 
-	profiles, err := txc.ListProfiles(limit)
+	tx, err := s.store.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	profiles, err := s.store.ListProfiles(tx, limit)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list profiles: %w", err)
 	}
@@ -358,63 +401,58 @@ func (s *ContactsService) genNewIcon(ctx context.Context, userId int32) (url str
 	if err != nil {
 		return "", err
 	}
-	url = fmt.Sprintf("http://localhost:9000/profile-icons/%s.png", idStr)
+	url = fmt.Sprintf("%s/profile-icons/%s.png", s.iconBaseURL, idStr)
 	return url, nil
 }
 
 func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name string) (*model.Profile, error) {
-	txc, err := s.store.Begin()
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
-	}
-	defer txc.Rollback()
-
-	var iconUrl string
-	if s.iconStore != nil {
-		iconUrl, err = s.genNewIcon(ctx, userId)
-		if err != nil {
-			iconUrl = ""
-			log.Warn().Err(err).Msgf("cannot generate icon for user '%d', proceeding without icon", userId)
-			// return nil, fmt.Errorf("cannot generate icon for user '%d': %w", userId, err)
-		}
-	} else {
-		iconUrl = ""
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
 
-	profile, err := txc.CreateProfile(userId, name, iconUrl)
+	defer tx.Rollback()
+
+	iconUrl := ""
+	profile, err := s.store.CreateProfile(tx, userId, name, iconUrl)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create profile for user '%d': %w", userId, err)
 	}
 
-	if err = txc.Commit(); err != nil {
-		return nil, err
+	if err = s.store.CreateProfileIconJob(tx, userId); err != nil {
+		return nil, fmt.Errorf("cannot create profile icon job for user '%d': %w", userId, err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	return profile, nil
 }
 
-func (s *ContactsService) GetProfile(userId int32) (*model.Profile, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) GetProfile(ctx context.Context, userId int32) (*model.Profile, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	profile, err := txc.GetProfile(userId)
+	profile, err := s.store.GetProfile(tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get profile for user '%d': %w", userId, err)
 	}
 	return profile, nil
 }
 
-func (s *ContactsService) DeleteProfile(userId int32) error {
-	txc, err := s.store.Begin()
+func (s *ContactsService) DeleteProfile(ctx context.Context, userId int32) error {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
 
-	ms, err := txc.FindOwners(userId)
+	defer tx.Rollback()
+
+	ms, err := s.store.FindOwners(tx, userId)
 	if err != nil {
 		return fmt.Errorf("cannot find groups owned by user '%d': %w", userId, err)
 	}
@@ -423,61 +461,61 @@ func (s *ContactsService) DeleteProfile(userId int32) error {
 		return fmt.Errorf("cannot delete profile for user '%d': user is owner of %d groups: %w", userId, len(ms), errs.ErrPermissionDenied)
 	}
 
-	if err = txc.DeleteProfile(userId); err != nil {
+	if err = s.store.DeleteProfile(tx, userId); err != nil {
 		return fmt.Errorf("cannot delete profile for user '%d': %w", userId, err)
 	}
 
-	if err = txc.Commit(); err != nil {
-		return err
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("cannot commit transaction: %w", err)
 	}
 
 	return nil
 }
 
-func (s *ContactsService) ListUserContacts(userId int32) ([]model.Contact, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) ListUserContacts(ctx context.Context, userId int32) ([]model.Contact, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	contacts, err := txc.ListUserContacts(userId)
+	contacts, err := s.store.ListUserContacts(tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list contacts for user '%d': %w", userId, err)
 	}
 	return contacts, nil
 }
 
-func (s *ContactsService) AddToContacts(ownerId int32, targetId int32) (*model.Contact, error) {
+func (s *ContactsService) AddToContacts(ctx context.Context, ownerId int32, targetId int32) (*model.Contact, error) {
 	if ownerId == targetId {
 		return nil, fmt.Errorf("cannot add self to contacts: %w", errs.ErrSelfContact)
 	}
 
-	txc, err := s.store.Begin()
+	tx, err := s.store.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
 
-	// TODO: alias option support
-	contact, err := txc.CreateContact(ownerId, targetId, nil)
+	defer tx.Rollback()
+
+	contact, err := s.store.CreateContact(tx, ownerId, targetId, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cannot add user '%d' to contacts: %w", targetId, err)
 	}
-	if err = txc.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("cannot commit transaction: %w", err)
 	}
 	return contact, nil
 }
 
-func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CanInvite(ctx context.Context, groupId int, inviterId int32) (bool, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	m, err := txc.GetMember(groupId, inviterId)
+	m, err := s.store.GetMember(tx, groupId, inviterId)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
@@ -491,16 +529,16 @@ func (s *ContactsService) CanInvite(groupId int, inviterId int32) (bool, error) 
 	return false, fmt.Errorf("user '%d' cannot invite members to group '%d': %w", inviterId, groupId, errs.ErrPermissionDenied)
 }
 
-func (s *ContactsService) CanSend(groupId int, userId int32) (bool, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CanSend(ctx context.Context, groupId int, userId int32) (bool, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	m, err := txc.GetMember(groupId, userId)
+	m, err := s.store.GetMember(tx, groupId, userId)
 	if err != nil {
-		if err == errs.ErrNotFound {
+		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("user is not member of group: %w", errs.ErrPermissionDenied)
 		}
 		return false, err
@@ -512,14 +550,14 @@ func (s *ContactsService) CanSend(groupId int, userId int32) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanRead(groupId int, userId int32) (bool, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CanRead(ctx context.Context, groupId int, userId int32) (bool, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	m, err := txc.GetMember(groupId, userId)
+	m, err := s.store.GetMember(tx, groupId, userId)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
@@ -532,14 +570,14 @@ func (s *ContactsService) CanRead(groupId int, userId int32) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanLeave(groupId int, userId int32) (bool, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CanLeave(ctx context.Context, groupId int, userId int32) (bool, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	m, err := txc.GetMember(groupId, userId)
+	m, err := s.store.GetMember(tx, groupId, userId)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
@@ -553,14 +591,14 @@ func (s *ContactsService) CanLeave(groupId int, userId int32) (bool, error) {
 	return false, nil
 }
 
-func (s *ContactsService) CanDeleteMember(groupId int, userId int32, targetId int32) (bool, error) {
-	txc, err := s.store.Begin()
+func (s *ContactsService) CanDeleteMember(ctx context.Context, groupId int, userId int32, targetId int32) (bool, error) {
+	tx, err := s.store.Begin()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot begin transaction: %w", err)
 	}
-	defer txc.Rollback()
+	defer tx.Rollback()
 
-	actor, err := txc.GetMember(groupId, userId)
+	actor, err := s.store.GetMember(tx, groupId, userId)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("user '%d' is not a member of group '%d': %w", userId, groupId, errs.ErrPermissionDenied)
@@ -568,7 +606,7 @@ func (s *ContactsService) CanDeleteMember(groupId int, userId int32, targetId in
 		return false, err
 	}
 
-	target, err := txc.GetMember(groupId, targetId)
+	target, err := s.store.GetMember(tx, groupId, targetId)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return false, fmt.Errorf("target user '%d' is not a member of group '%d': %w", targetId, groupId, errs.ErrNotFound)
@@ -589,7 +627,7 @@ type AccessRequest struct {
 	TargetId int32 // optional, used for actions that target another user
 }
 
-func (s *ContactsService) Can(req AccessRequest) (bool, access.Action, error) {
+func (s *ContactsService) Can(ctx context.Context, req AccessRequest) (bool, access.Action, error) {
 	var (
 		can bool
 		act access.Action
@@ -599,15 +637,15 @@ func (s *ContactsService) Can(req AccessRequest) (bool, access.Action, error) {
 
 	switch req.Action {
 	case access.ActionInvite:
-		can, err = s.CanInvite(req.ChatId, req.UserId)
+		can, err = s.CanInvite(ctx, req.ChatId, req.UserId)
 	case access.ActionSend:
-		can, err = s.CanSend(req.ChatId, req.UserId)
+		can, err = s.CanSend(ctx, req.ChatId, req.UserId)
 	case access.ActionRead:
-		can, err = s.CanRead(req.ChatId, req.UserId)
+		can, err = s.CanRead(ctx, req.ChatId, req.UserId)
 	case access.ActionLeave:
-		can, err = s.CanLeave(req.ChatId, req.UserId)
+		can, err = s.CanLeave(ctx, req.ChatId, req.UserId)
 	case access.ActionDeleteMember:
-		can, err = s.CanDeleteMember(req.ChatId, req.UserId, req.TargetId)
+		can, err = s.CanDeleteMember(ctx, req.ChatId, req.UserId, req.TargetId)
 	default:
 		can = false
 		act = ""

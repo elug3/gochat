@@ -18,10 +18,13 @@ type IconStore struct {
 	client *s3.Client
 }
 
-func NewIconStore(endpoint string) (*IconStore, error) {
-	region := "us-east-1"
+func NewIconStore(endpoint, accessKey, secretKey, region string) (*IconStore, error) {
+	if region == "" {
+		region = "us-east-1"
+	}
+	
 	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
+		context.Background(),
 		config.WithRegion(region),
 		config.WithEndpointResolver(
 			aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
@@ -29,7 +32,7 @@ func NewIconStore(endpoint string) (*IconStore, error) {
 			}),
 		),
 		config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider("minioadmin", "minioadmin", ""),
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
 		),
 	)
 	if err != nil {

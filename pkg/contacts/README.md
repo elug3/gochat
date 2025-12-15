@@ -34,6 +34,7 @@ go run ./cmd/gochat-contacts_server \
 
 Published (when mutations succeed and `pub` is configured):
 
+- `contacts.reset` (`ContactsReset`) after the store initializes so downstream projections can rebuild state
 - `contacts.group.created` (`GroupCreated`) after `CreateUserGroup`
 - `contacts.group.deleted` (`GroupDeleted`) after `DeleteUserGroup`
 - `contacts.member.joined` (`MemberJoined`) after `CreateUserGroup` and `Invite`

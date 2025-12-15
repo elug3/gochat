@@ -4,10 +4,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 type ContactsHandler struct {
@@ -16,7 +19,9 @@ type ContactsHandler struct {
 }
 
 func (h *ContactsHandler) HandleListGroups(c *gin.Context) {
-	groups, err := h.contacts.ListGroups()
+	limit := parseLimit(c, DefaultListLimit)
+	
+	groups, err := h.contacts.ListGroups(c.Request.Context(), limit)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -30,7 +35,7 @@ func (h *ContactsHandler) HandleGetGroup(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
 		return
 	}
-	g, err := h.contacts.GetGroup(groupId)
+	g, err := h.contacts.GetGroup(c.Request.Context(), groupId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -49,7 +54,7 @@ func (h *ContactsHandler) HandleGetUserGroup(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
 		return
 	}
-	g, err := h.contacts.GetUserGroup(groupId, userId)
+	g, err := h.contacts.GetUserGroup(c.Request.Context(), groupId, userId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -63,7 +68,7 @@ func (h *ContactsHandler) HandleListUserGroup(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
-	gs, err := h.contacts.ListUserGroups(userId)
+	gs, err := h.contacts.ListUserGroups(c.Request.Context(), userId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -78,14 +83,14 @@ func (h *ContactsHandler) HandleCreateUserGroup(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name string `json:"name" binding:"required"`
+		Name string `json:"name" binding:"required,min=2,max=50"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	g, err := h.contacts.CreateUserGroup(userId, req.Name)
+	g, err := h.contacts.CreateUserGroup(c.Request.Context(), userId, req.Name)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -112,7 +117,9 @@ func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
 }
 
 func (h *ContactsHandler) HandleListProfiles(c *gin.Context) {
-	profiles, err := h.contacts.ListProfiles(50)
+	limit := parseLimit(c, DefaultListLimit)
+	
+	profiles, err := h.contacts.ListProfiles(c.Request.Context(), limit)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -125,7 +132,7 @@ func (h *ContactsHandler) HandleDeleteProfile(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
-	if err := h.contacts.DeleteProfile(userId); err != nil {
+	if err := h.contacts.DeleteProfile(c.Request.Context(), userId); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -144,7 +151,7 @@ func (h *ContactsHandler) HandleListGroupMembers(c *gin.Context) {
 		return
 	}
 
-	ms, err := h.contacts.ListGroupMembers(gid, uid)
+	ms, err := h.contacts.ListGroupMembers(c.Request.Context(), gid, uid)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -170,7 +177,7 @@ func (h *ContactsHandler) HandleInviteGroupMember(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	m, err := h.contacts.Invite(gid, uid, req.UserId)
+	m, err := h.contacts.Invite(c.Request.Context(), gid, uid, req.UserId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -194,7 +201,7 @@ func (h *ContactsHandler) HandleRemoveGroupMember(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid member_id parameter"})
 		return
 	}
-	if err := h.contacts.DeleteMember(gid, uid, mid); err != nil {
+	if err := h.contacts.DeleteMember(c.Request.Context(), gid, uid, mid); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -214,7 +221,7 @@ func (h *ContactsHandler) HandleAccess(c *gin.Context) {
 		return
 	}
 	var errMsg string
-	can, action, err := h.contacts.Can(AccessRequest{
+	can, action, err := h.contacts.Can(c.Request.Context(), AccessRequest{
 		UserId:   req.UserId,
 		ChatId:   req.ChatId,
 		TargetId: req.TargetId,
@@ -236,7 +243,7 @@ func (h *ContactsHandler) HandleGetProfile(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
-	p, err := h.contacts.GetProfile(userId)
+	p, err := h.contacts.GetProfile(c.Request.Context(), userId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -250,7 +257,7 @@ func (h *ContactsHandler) HandleListContacts(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
 		return
 	}
-	contacts, err := h.contacts.ListUserContacts(userId)
+	contacts, err := h.contacts.ListUserContacts(c.Request.Context(), userId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -271,7 +278,7 @@ func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	contact, err := h.contacts.AddToContacts(userId, req.TargetId)
+	contact, err := h.contacts.AddToContacts(c.Request.Context(), userId, req.TargetId)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -280,7 +287,17 @@ func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
 }
 
 func (h *ContactsHandler) HandleHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	health := h.contacts.HealthCheck(c.Request.Context())
+	
+	// Determine overall status
+	status := http.StatusOK
+	if dbStatus, ok := health["database"].(map[string]interface{}); ok {
+		if dbStatus["status"] != "healthy" {
+			status = http.StatusServiceUnavailable
+		}
+	}
+	
+	c.JSON(status, health)
 }
 
 func registerRoutes(router gin.IRouter, h *ContactsHandler) {
@@ -311,6 +328,11 @@ func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 
 func newContactsHandler(contacts *ContactsService) *ContactsHandler {
 	router := gin.Default()
+	
+	// Add middleware
+	router.Use(requestIDMiddleware())
+	router.Use(loggingMiddleware())
+	
 	h := &ContactsHandler{
 		router:   router,
 		contacts: contacts,
@@ -326,12 +348,11 @@ func (h *ContactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func respondError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, errs.ErrPermissionDenied):
-		status = http.StatusForbidden
-	case errors.Is(err, errs.ErrNotFound),
+	case errors.Is(err, errs.ErrPermissionDenied),
+		errors.Is(err, errs.ErrNotFound),
 		errors.Is(err, errs.ErrGroupNotExists),
 		errors.Is(err, errs.ErrUserNotExists):
-		status = http.StatusNotFound
+		status = http.StatusForbidden
 	case errors.Is(err, errs.ErrExists):
 		status = http.StatusConflict
 	case errors.Is(err, errs.ErrSelfContact):
@@ -349,4 +370,53 @@ func parseInt32(s string) (int32, error) {
 // parseUserId parses user_id from path parameter
 func parseUserId(c *gin.Context) (int32, error) {
 	return parseInt32(c.Param("user_id"))
+}
+
+// parseLimit parses limit query parameter with validation
+func parseLimit(c *gin.Context, defaultLimit int) int {
+	limitStr := c.DefaultQuery("limit", strconv.Itoa(defaultLimit))
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		return defaultLimit
+	}
+	if limit > MaxListLimit {
+		return MaxListLimit
+	}
+	return limit
+}
+
+// requestIDMiddleware adds a request ID to each request
+func requestIDMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		requestID := c.GetHeader("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+		c.Set("request_id", requestID)
+		c.Header("X-Request-ID", requestID)
+		c.Next()
+	}
+}
+
+// loggingMiddleware logs HTTP requests
+func loggingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+
+		c.Next()
+
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		requestID, _ := c.Get("request_id")
+
+		log.Info().
+			Str("request_id", requestID.(string)).
+			Str("method", method).
+			Str("path", path).
+			Int("status", status).
+			Dur("latency", latency).
+			Msg("HTTP request")
+	}
 }

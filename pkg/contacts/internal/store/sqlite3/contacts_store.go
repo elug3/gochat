@@ -4,12 +4,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
-	"github.com/elug3/gochat/pkg/contacts/internal/store"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -17,41 +17,32 @@ type ContactsStore struct {
 	db *sql.DB
 }
 
-type TxContacts struct {
-	tx *sql.Tx
-}
-
-func NewContactsStore(saveDir string, noSave bool) (*ContactsStore, error) {
-	db, err := openDB(saveDir, noSave)
+func NewContactsStore(saveDir string, noSave bool) (store *ContactsStore, isNew bool, err error) {
+	db, isNew, err := openDB(saveDir, noSave)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+
+	// Configure connection pool
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * 60 * 1e9) // 5 minutes in nanoseconds
+
 	if err = initDB(db); err != nil {
-		return nil, err
+		return
 	}
-	store := ContactsStore{db: db}
-	return &store, nil
+	store = &ContactsStore{db: db}
+
+	return store, isNew, nil
 }
 
-func (store *ContactsStore) Begin() (store.TxContacts, error) {
-	tx, err := store.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	return &TxContacts{tx: tx}, nil
+func (store *ContactsStore) Begin() (*sql.Tx, error) {
+	return store.db.Begin()
 }
 
-func (txc *TxContacts) Rollback() error {
-	return txc.tx.Rollback()
-}
-
-func (txc *TxContacts) Commit() error {
-	return txc.tx.Commit()
-}
-
-func (txc *TxContacts) GetGroup(groupId int) (*model.Group, error) {
+func (store *ContactsStore) GetGroup(tx *sql.Tx, groupId int) (*model.Group, error) {
 	var group model.Group
-	err := txc.tx.QueryRow(`
+	err := tx.QueryRow(`
 	SELECT id, name, created_at
 	FROM groups
 	WHERE id = ?
@@ -63,9 +54,9 @@ func (txc *TxContacts) GetGroup(groupId int) (*model.Group, error) {
 }
 
 // ListGroups returns a list of groups
-func (txc *TxContacts) ListGroups(limit int) ([]model.Group, error) {
+func (store *ContactsStore) ListGroups(tx *sql.Tx, limit int) ([]model.Group, error) {
 	// TODO: add query param to search by name, time
-	rows, err := txc.tx.Query(`
+	rows, err := tx.Query(`
 	SELECT id, name, created_at
 	FROM groups
 	LIMIT ?;
@@ -90,8 +81,8 @@ func (txc *TxContacts) ListGroups(limit int) ([]model.Group, error) {
 	return groups, nil
 }
 
-func (txc *TxContacts) ListUserGroups(userId int32) ([]model.Group, error) {
-	exists, err := txc.profileExists(userId)
+func (store *ContactsStore) ListUserGroups(tx *sql.Tx, userId int32) ([]model.Group, error) {
+	exists, err := store.profileExists(tx, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -99,15 +90,15 @@ func (txc *TxContacts) ListUserGroups(userId int32) ([]model.Group, error) {
 		return nil, errs.ErrUserNotExists
 	}
 
-	groups, err := txc.listUserGroups(userId)
+	groups, err := store.listUserGroups(tx, userId)
 	if err != nil {
 		return nil, err
 	}
 	return groups, nil
 }
 
-func (txc *TxContacts) listUserGroups(userId int32) ([]model.Group, error) {
-	rows, err := txc.tx.Query(`
+func (store *ContactsStore) listUserGroups(tx *sql.Tx, userId int32) ([]model.Group, error) {
+	rows, err := tx.Query(`
 	SELECT g.id, g.name, g.created_at
 	FROM groups g
 	JOIN member m ON g.id = m.group_id
@@ -132,11 +123,11 @@ func (txc *TxContacts) listUserGroups(userId int32) ([]model.Group, error) {
 	return groups, nil
 }
 
-func (txc *TxContacts) CreateGroup(name string) (*model.Group, error) {
+func (store *ContactsStore) CreateGroup(tx *sql.Tx, name string) (*model.Group, error) {
 	if len(name) < 2 {
 		return nil, fmt.Errorf("group name must be at least 2 characters long")
 	}
-	row := txc.tx.QueryRow(`
+	row := tx.QueryRow(`
 	INSERT INTO groups (name)
 	VALUES (?)
 	RETURNING id, name, created_at`, name)
@@ -148,8 +139,8 @@ func (txc *TxContacts) CreateGroup(name string) (*model.Group, error) {
 	return &group, nil
 }
 
-func (txc *TxContacts) DeleteGroup(id int) error {
-	result, err := txc.tx.Exec(`
+func (store *ContactsStore) DeleteGroup(tx *sql.Tx, id int) error {
+	result, err := tx.Exec(`
 	DELETE FROM groups
 	WHERE id = ?;
 	`, id)
@@ -166,12 +157,12 @@ func (txc *TxContacts) DeleteGroup(id int) error {
 	return nil
 }
 
-// memberExists checks member exists in group
-func (txc *TxContacts) MemberExists(groupId int, userId int32) (bool, error) {
+// MemberExists checks member exists in group
+func (store *ContactsStore) MemberExists(tx *sql.Tx, groupId int, userId int32) (bool, error) {
 	var memberExists bool
 
 	var profileExists, groupExists bool
-	err := txc.tx.QueryRow(`
+	err := tx.QueryRow(`
 	SELECT
 		EXISTS(SELECT 1 FROM profile WHERE user_id = ?) AS profile_exists,
 		EXISTS(SELECT 1 FROM groups WHERE id = ?) AS group_exists,
@@ -190,8 +181,8 @@ func (txc *TxContacts) MemberExists(groupId int, userId int32) (bool, error) {
 	return memberExists, nil
 }
 
-func (txc *TxContacts) CreateMember(groupId int, userId int32, role access.Role) (*model.Member, error) {
-	exists, err := txc.MemberExists(groupId, userId)
+func (store *ContactsStore) CreateMember(tx *sql.Tx, groupId int, userId int32, role access.Role) (*model.Member, error) {
+	exists, err := store.MemberExists(tx, groupId, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +190,7 @@ func (txc *TxContacts) CreateMember(groupId int, userId int32, role access.Role)
 		return nil, errs.ErrExists
 	}
 
-	row := txc.tx.QueryRow(`
+	row := tx.QueryRow(`
 	INSERT INTO member (group_id, user_id, role)
 	VALUES (?, ?, ?)
 	RETURNING group_id, user_id, created_at, role`, groupId, userId, role)
@@ -210,15 +201,9 @@ func (txc *TxContacts) CreateMember(groupId int, userId int32, role access.Role)
 	return &member, nil
 }
 
-func (txc *TxContacts) GetMember(groupId int, userId int32) (*model.Member, error) {
-	// if exists, err := txc.MemberExists(groupId, userId); !exists {
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// }
-
+func (store *ContactsStore) GetMember(tx *sql.Tx, groupId int, userId int32) (*model.Member, error) {
 	var member model.Member
-	err := txc.tx.QueryRow(`
+	err := tx.QueryRow(`
 	SELECT group_id, user_id, created_at, role
 	FROM member
 	WHERE 
@@ -234,8 +219,8 @@ func (txc *TxContacts) GetMember(groupId int, userId int32) (*model.Member, erro
 	return &member, nil
 }
 
-func (txc *TxContacts) ListGroupMembers(groupId int) ([]model.Member, error) {
-	rows, err := txc.tx.Query(`
+func (store *ContactsStore) ListGroupMembers(tx *sql.Tx, groupId int) ([]model.Member, error) {
+	rows, err := tx.Query(`
 	SELECT group_id, user_id, created_at, role
 	FROM member
 	WHERE group_id = ?;
@@ -259,8 +244,8 @@ func (txc *TxContacts) ListGroupMembers(groupId int) ([]model.Member, error) {
 	return members, nil
 }
 
-func (txc *TxContacts) DeleteMember(groupId int, userId int32) error {
-	exists, err := txc.MemberExists(groupId, userId)
+func (store *ContactsStore) DeleteMember(tx *sql.Tx, groupId int, userId int32) error {
+	exists, err := store.MemberExists(tx, groupId, userId)
 	if err != nil {
 		return err
 	}
@@ -268,7 +253,7 @@ func (txc *TxContacts) DeleteMember(groupId int, userId int32) error {
 		return errs.ErrNotFound
 	}
 
-	result, err := txc.tx.Exec(`
+	result, err := tx.Exec(`
 	DELETE FROM member
 	WHERE group_id = ? AND user_id = ?;
 	`, groupId, userId)
@@ -285,9 +270,9 @@ func (txc *TxContacts) DeleteMember(groupId int, userId int32) error {
 	return nil
 }
 
-func (txc *TxContacts) profileExists(id int32) (bool, error) {
+func (store *ContactsStore) profileExists(tx *sql.Tx, id int32) (bool, error) {
 	var profileExists bool
-	err := txc.tx.QueryRow(`
+	err := tx.QueryRow(`
 	SELECT 
 		EXISTS (SELECT 1 FROM profile WHERE user_id = ?);
 	`, id).Scan(&profileExists)
@@ -297,8 +282,8 @@ func (txc *TxContacts) profileExists(id int32) (bool, error) {
 	return profileExists, nil
 }
 
-func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
-	rows, err := txc.tx.Query(`
+func (store *ContactsStore) ListProfiles(tx *sql.Tx, limit int) ([]model.Profile, error) {
+	rows, err := tx.Query(`
 	SELECT user_id, name, icon_url
 	FROM profile
 	LIMIT ?;
@@ -323,19 +308,23 @@ func (txc *TxContacts) ListProfiles(limit int) ([]model.Profile, error) {
 	return profiles, nil
 }
 
-func (txc *TxContacts) CreateProfile(userId int32, name, iconUrl string) (*model.Profile, error) {
-	if exists, _ := txc.profileExists(userId); exists {
+func (store *ContactsStore) CreateProfile(tx *sql.Tx, userId int32, name, iconUrl string) (*model.Profile, error) {
+	exists, err := store.profileExists(tx, userId)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
 		return nil, errs.ErrExists
 	}
 
-	row := txc.tx.QueryRow(`
+	row := tx.QueryRow(`
 	INSERT INTO profile (user_id, name, icon_url)
 	VALUES (?, ?, ?)
 	RETURNING user_id, name, icon_url;
 	`, userId, name, iconUrl)
 	var profile model.Profile
 
-	err := row.Scan(&profile.Id, &profile.Name, &profile.IconUrl)
+	err = row.Scan(&profile.Id, &profile.Name, &profile.IconUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -343,15 +332,15 @@ func (txc *TxContacts) CreateProfile(userId int32, name, iconUrl string) (*model
 	return &profile, nil
 }
 
-func (txc *TxContacts) UpdateProfile(userId int32, name, iconUrl string) (*model.Profile, error) {
-	if exists, err := txc.profileExists(userId); !exists {
+func (store *ContactsStore) UpdateProfile(tx *sql.Tx, userId int32, name, iconUrl string) (*model.Profile, error) {
+	if exists, err := store.profileExists(tx, userId); !exists {
 		if err != nil {
 			return nil, err
 		}
 		return nil, errs.ErrUserNotExists
 	}
 
-	_, err := txc.tx.Exec(`
+	_, err := tx.Exec(`
 	UPDATE profile
 	SET name = ?, icon_url = ?
 	WHERE user_id = ?;
@@ -360,18 +349,18 @@ func (txc *TxContacts) UpdateProfile(userId int32, name, iconUrl string) (*model
 		return nil, err
 	}
 
-	return txc.GetProfile(userId)
+	return store.GetProfile(tx, userId)
 }
 
-func (txc *TxContacts) DeleteProfile(id int32) error {
-	if exists, err := txc.profileExists(id); !exists {
+func (store *ContactsStore) DeleteProfile(tx *sql.Tx, id int32) error {
+	if exists, err := store.profileExists(tx, id); !exists {
 		if err != nil {
 			return err
 		}
 		return errs.ErrUserNotExists
 	}
 
-	result, err := txc.tx.Exec(`
+	result, err := tx.Exec(`
 	DELETE FROM profile
 	WHERE user_id = ?
 	`, id)
@@ -388,9 +377,9 @@ func (txc *TxContacts) DeleteProfile(id int32) error {
 	return nil
 }
 
-func (txc *TxContacts) GetProfile(userId int32) (*model.Profile, error) {
+func (store *ContactsStore) GetProfile(tx *sql.Tx, userId int32) (*model.Profile, error) {
 	var profile model.Profile
-	err := txc.tx.QueryRow(`
+	err := tx.QueryRow(`
 	SELECT user_id, name, icon_url
 	FROM profile
 	WHERE user_id = ?
@@ -401,9 +390,9 @@ func (txc *TxContacts) GetProfile(userId int32) (*model.Profile, error) {
 	return &profile, nil
 }
 
-func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*model.Contact, error) {
+func (store *ContactsStore) CreateContact(tx *sql.Tx, ownerId, targetId int32, alias *string) (*model.Contact, error) {
 	// owner exists
-	if exists, err := txc.profileExists(ownerId); !exists {
+	if exists, err := store.profileExists(tx, ownerId); !exists {
 		if err != nil {
 			return nil, err
 		}
@@ -411,7 +400,7 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 	}
 
 	// target exists
-	if exists, err := txc.profileExists(targetId); !exists {
+	if exists, err := store.profileExists(tx, targetId); !exists {
 		if err != nil {
 			return nil, err
 		}
@@ -423,7 +412,7 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 	}
 
 	// TODO: improve query
-	row := txc.tx.QueryRow(`
+	row := tx.QueryRow(`
 	INSERT INTO contacts (owner_id, target_id, alias)
 	VALUES (?, ?, ?)
 	RETURNING target_id, (SELECT name FROM profile WHERE user_id = target_id), alias, created_at;
@@ -440,15 +429,15 @@ func (txc *TxContacts) CreateContact(ownerId, targetId int32, alias *string) (*m
 	return &contact, nil
 }
 
-func (txc *TxContacts) ListUserContacts(userId int32) ([]model.Contact, error) {
-	if exists, err := txc.profileExists(userId); !exists {
+func (store *ContactsStore) ListUserContacts(tx *sql.Tx, userId int32) ([]model.Contact, error) {
+	if exists, err := store.profileExists(tx, userId); !exists {
 		if err != nil {
 			return nil, err
 		}
 		return nil, errs.ErrUserNotExists
 	}
 
-	rows, err := txc.tx.Query(`
+	rows, err := tx.Query(`
 	SELECT p.user_id, p.name, c.alias, c.created_at
 	FROM contacts c
 	JOIN profile p ON c.target_id = p.user_id
@@ -477,15 +466,15 @@ func (txc *TxContacts) ListUserContacts(userId int32) ([]model.Contact, error) {
 	return contacts, nil
 }
 
-func (txc *TxContacts) DeleteUserContact(ownerId, targetId int32) error {
-	if exists, err := txc.profileExists(ownerId); !exists {
+func (store *ContactsStore) DeleteUserContact(tx *sql.Tx, ownerId, targetId int32) error {
+	if exists, err := store.profileExists(tx, ownerId); !exists {
 		if err != nil {
 			return err
 		}
 		return errs.ErrUserNotExists
 	}
 
-	result, err := txc.tx.Exec(`
+	result, err := tx.Exec(`
 	DELETE FROM contacts
 	WHERE owner_id = ? AND target_id = ?;
 	`, ownerId, targetId)
@@ -502,8 +491,8 @@ func (txc *TxContacts) DeleteUserContact(ownerId, targetId int32) error {
 	return nil
 }
 
-func (txc *TxContacts) FindOwners(userId int32) ([]model.Member, error) {
-	rows, err := txc.tx.Query(`
+func (store *ContactsStore) FindOwners(tx *sql.Tx, userId int32) ([]model.Member, error) {
+	rows, err := tx.Query(`
 	SELECT group_id, user_id, created_at, role
 	FROM member
 	WHERE user_id = ? AND role = ?;
@@ -532,6 +521,65 @@ func (txc *TxContacts) FindOwners(userId int32) ([]model.Member, error) {
 	return members, nil
 }
 
+// CreateProfileIconJob creates a job to upload the icon to S3
+// if icon uploaded and iconUrl is available, should call  DoneProfileIconJob to update the profile
+func (store *ContactsStore) CreateProfileIconJob(tx *sql.Tx, profileId int32) error {
+	_, err := tx.Exec(`
+	INSERT INTO icon_jobs (profile_id)
+	VALUES (?);
+	`, profileId)
+	if err != nil {
+		return wrapErr(err)
+	}
+	return nil
+}
+
+func (store *ContactsStore) ListProfileIconJobs(tx *sql.Tx) ([]model.IconJob, error) {
+	rows, err := tx.Query(`
+	SELECT id, profile_id, icon_url, created_at
+	FROM icon_jobs;
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	jobs := make([]model.IconJob, 0)
+	for rows.Next() {
+		var job model.IconJob
+		if err := rows.Scan(&job.Id, &job.ProfileId, &job.IconUrl, &job.CreatedAt); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// DoneProfileIconJob deletes the job and updates the profile icon url
+func (store *ContactsStore) DoneProfileIconJob(tx *sql.Tx, jobId int, iconUrl string) error {
+	var profileId int32
+	err := tx.QueryRow(`
+	DELETE FROM icon_jobs
+	WHERE id = ?
+	RETURNING profile_id;
+	`, jobId).Scan(&profileId)
+	if err != nil {
+		return wrapErr(err)
+	}
+
+	_, err = tx.Exec(`
+	UPDATE profile
+	SET icon_url = ?
+	WHERE user_id = ?;
+	`, iconUrl, profileId)
+	if err != nil {
+		return wrapErr(err)
+	}
+	return nil
+}
+
 // wrapErr converts sqlite3.Error to store.Error
 // if the error cannot be converted, it returns the original error
 func wrapErr(err error) error {
@@ -550,39 +598,47 @@ func nullStringPtr(ns sql.NullString) *string {
 	return nil
 }
 
-func openDB(saveDir string, inMemory bool) (*sql.DB, error) {
+func openDB(saveDir string, inMemory bool) (db *sql.DB, isNew bool, err error) {
 	if inMemory {
-		db, err := sql.Open("sqlite3", "file:contacts_memdb?mode=memory&cache=shared")
-		if err != nil {
-			return nil, err
+		if db, err = sql.Open("sqlite3", "file:contacts_memdb?mode=memory&cache=shared"); err != nil {
+			return nil, false, err
 		}
-		return db, nil
+		return db, true, nil
 	}
 	path := filepath.Join(saveDir, "contacts.db")
-	return sql.Open("sqlite3", path)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		isNew = true
+	}
+	if db, err = sql.Open("sqlite3", path); err != nil {
+		return nil, false, err
+	}
+	return db, isNew, nil
 }
 
-func initDB(db *sql.DB) error {
+// initDB initializes the database schema
+func initDB(db *sql.DB) (err error) {
 	errs := make([]error, 0)
 
-	// _, err := db.Exec(`PRAGMA foreign_keys = ON;`)
-	// if err != nil {
-	// 	errs = append(errs, err)
-	// }
+	// Enable foreign key constraints
+	_, err = db.Exec(`PRAGMA foreign_keys = ON;`)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("enable foreign keys: %w", err))
+	}
 
-	// create group table
-	_, err := db.Exec(`
+	tableQueries := map[string]string{
+		"create table profile": `
+	CREATE TABLE IF NOT EXISTS profile (
+	user_id INTEGER PRIMARY KEY,
+	name varchar(20) NOT NULL,
+	icon_url varchar(255) NOT NULL
+	);`,
+		"create table groups": `
 	CREATE TABLE IF NOT EXISTS groups (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	name varchar(50) NOT NULL CHECK(length(name) >= 2),
 	created_at TIMESTAMP DEFAULT (datetime('now'))
-	);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("create table group: %w", err))
-	}
-
-	// create member table
-	_, err = db.Exec(`
+	);`,
+		"create table member": `
 	CREATE TABLE IF NOT EXISTS member (
 	user_id INTEGER NOT NULL,
 	group_id INTEGER NOT NULL,
@@ -591,24 +647,8 @@ func initDB(db *sql.DB) error {
 	FOREIGN KEY(user_id) REFERENCES profile(user_id) ON DELETE CASCADE,
 	FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
 	PRIMARY KEY(user_id, group_id)
-	);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("create table member: %w", err))
-	}
-
-	// create profile table
-	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS profile (
-	user_id INTEGER PRIMARY KEY,
-	name varchar(20) NOT NULL,
-	icon_url varchar(255) NOT NULL
-	);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("create table profile: %w", err))
-	}
-
-	// create contact table
-	_, err = db.Exec(`
+	);`,
+		"create table contacts": `
 	CREATE TABLE IF NOT EXISTS contacts (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner_id INTEGER NOT NULL,
@@ -617,10 +657,38 @@ func initDB(db *sql.DB) error {
 	created_at TIMESTAMP DEFAULT (datetime('now')),
 	FOREIGN KEY(owner_id) REFERENCES profile(user_id) ON DELETE CASCADE,
 	FOREIGN KEY(target_id) REFERENCES profile(user_id) ON DELETE CASCADE
-	);`)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("create table contacts: %w", err))
+	);`,
+		"create table icon_jobs": `
+	CREATE TABLE IF NOT EXISTS icon_jobs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	profile_id INTEGER NOT NULL,
+	icon_url VARCHAR(255),
+	created_at TIMESTAMP DEFAULT (datetime('now')),
+	FOREIGN KEY(profile_id) REFERENCES profile(user_id) ON DELETE CASCADE
+	);`,
 	}
 
+	indexQueries := map[string]string{
+		"create index idx_contacts_owner": `
+	CREATE INDEX IF NOT EXISTS idx_contacts_owner
+	ON contacts (owner_id);`,
+		"create index idx_member_user": `
+	CREATE INDEX IF NOT EXISTS idx_member_user
+	ON member (user_id);`,
+	}
+
+	for name, query := range tableQueries {
+		_, err = db.Exec(query)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
+
+	for name, query := range indexQueries {
+		_, err = db.Exec(query)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
 	return errors.Join(errs...)
 }
