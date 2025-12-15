@@ -128,3 +128,11 @@ func (store *ChatStore) UpdateLastReadSeq(ctx context.Context, chatId int, userI
 
 	return nil
 }
+
+// Reset clears all data in the chat store.
+func (store *ChatStore) Reset(ctx context.Context) error {
+	if err := store.rdb.FlushDB(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to reset store: %w", err)
+	}
+	return nil
+}

@@ -48,7 +48,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-full flex-col gap-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <aside className="flex flex-shrink-0 w-[280px] h-full min-h-0 flex-col gap-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
@@ -204,11 +204,11 @@ export default function Chats() {
   }, [loaderData, setChats]);
 
   return (
-    <div className="page h-full">
+    <div className="page flex-1 min-h-0 h-full">
         <Sidebar />
 
         {/* content */}
-        <main className="">
+        <main className="flex-1 min-h-0">
           <Outlet /> {/* <p>loading</p> will be centered */}
         </main>
     </div>

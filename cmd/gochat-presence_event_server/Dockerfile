@@ -1,11 +1,16 @@
+FROM golang:1.25.3 AS builder
+
+WORKDIR /app
+
+COPY . .
+COPY go.work go.work.sum ./
+ENV GOWORK=/app/go.work
+
+RUN go build -o /bin/gochat-presence_event_server ./cmd/gochat-presence_event_server
+
 FROM gcr.io/distroless/base
-# TODO: use go build
 
-
-
-COPY gochat-presence_event_server ./gochat-presence_event_server
+COPY --from=builder /bin/gochat-presence_event_server /gochat-presence_event_server
 
 EXPOSE 8080
-ENTRYPOINT ["./gochat-presence_event_server"]
-
-CMD ["./gochat-presence_event_server"]
+ENTRYPOINT ["/gochat-presence_event_server"]

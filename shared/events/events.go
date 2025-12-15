@@ -13,12 +13,13 @@ const (
 	// SubjectUserRegistered is the subject for UserRegistered events.
 	SubjectUserRegistered = "auth.registered"
 
-	SubjectGroupCreated = "contacts.group.created"
-	SubjectGroupDeleted = "contacts.group.deleted"
-	SubjectMemberJoined = "contacts.member.joined"
-	SubjectMemberLeft   = "contacts.member.left"
-	SubjectMessageSent  = "message.sent"
-	SubjectMessageRead  = "message.read"
+	SubjectGroupCreated  = "contacts.group.created"
+	SubjectGroupDeleted  = "contacts.group.deleted"
+	SubjectMemberJoined  = "contacts.member.joined"
+	SubjectMemberLeft    = "contacts.member.left"
+	SubjectContactsReset = "contacts.reset"
+	SubjectMessageSent   = "message.sent"
+	SubjectMessageRead   = "message.read"
 
 	SubjectWebsocketSent         = "websocket.sent"
 	SubjectWebsocketConnected    = "websocket.connected"
@@ -76,6 +77,10 @@ type MemberLeft struct {
 	TimeStamp int64
 }
 
+type ContactsReset struct {
+	TimeStamp int64
+}
+
 type MessageSent struct {
 	ChatId    int
 	SenderId  int32
@@ -128,6 +133,10 @@ func (e MemberLeft) Subject() string {
 	return SubjectMemberLeft
 }
 
+func (ContactsReset) Subject() string {
+	return SubjectContactsReset
+}
+
 func (e MessageSent) Subject() string {
 	return SubjectMessageSent
 }
@@ -156,6 +165,7 @@ var subjects = map[string]EventFactory{
 	SubjectGroupDeleted:          func() Event { return &GroupDeleted{} },
 	SubjectMemberJoined:          func() Event { return &MemberJoined{} },
 	SubjectMemberLeft:            func() Event { return &MemberLeft{} },
+	SubjectContactsReset:         func() Event { return &ContactsReset{} },
 	SubjectMessageSent:           func() Event { return &MessageSent{} },
 	SubjectWebsocketSent:         func() Event { return &WebsocketSent{} },
 	SubjectMessageRead:           func() Event { return &MessageRead{} },

@@ -1,8 +1,16 @@
+FROM golang:1.25.3 AS builder
+
+WORKDIR /app
+
+COPY . .
+COPY go.work go.work.sum ./
+ENV GOWORK=/app/go.work
+
+RUN go build -o /bin/gochat-auth_server ./cmd/gochat-auth_server
+
 FROM gcr.io/distroless/base
-# TODO: use go build
-COPY gochat-auth_server ./gochat-contacts_server
+
+COPY --from=builder /bin/gochat-auth_server /gochat-auth_server
 
 EXPOSE 8080
-ENTRYPOINT ["/gochat-contacts_server"] 
-
-CMD ["./gochat-contacts_server"]
+ENTRYPOINT ["/gochat-auth_server"]

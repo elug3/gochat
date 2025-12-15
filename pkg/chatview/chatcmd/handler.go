@@ -43,3 +43,7 @@ func (s *ChatCommandHandler) OnMessageSent(ctx context.Context, ev *events.Messa
 func (s *ChatCommandHandler) OnMessageRead(ctx context.Context, ev *events.MessageRead) error {
 	return s.store.UpdateLastReadSeq(ctx, ev.ChatId, ev.UserId)
 }
+
+func (s *ChatCommandHandler) OnContactsReset(ctx context.Context, ev *events.ContactsReset) error {
+	return s.store.Reset(ctx)
+}

@@ -67,6 +67,8 @@ func (s *ChatProjectionServer) handleEvent(event events.Event) error {
 		err = s.handler.OnMessageSent(ctx, ev)
 	case *events.MessageRead:
 		err = s.handler.OnMessageRead(ctx, ev)
+	case *events.ContactsReset:
+		err = s.handler.OnContactsReset(ctx, ev)
 	default:
 		err = fmt.Errorf("unhandled event type: %T", ev)
 	}

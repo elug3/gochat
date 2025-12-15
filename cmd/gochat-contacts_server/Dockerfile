@@ -1,17 +1,16 @@
-# FROM golang:1.25 AS builder 
+FROM golang:1.25.3 AS builder
 
-# WORKDIR /app
+WORKDIR /app
 
-# COPY go.mod go.sum* main.go ./
-# RUN go mod tidy
-# RUN go build .
+COPY . .
+COPY go.work go.work.sum ./
+ENV GOWORK=/app/go.work
 
+RUN go build -o /bin/gochat-contacts_server ./cmd/gochat-contacts_server
 
 FROM gcr.io/distroless/base
-# TODO: use go build
-COPY gochat-contacts_server ./gochat-contacts_server
+
+COPY --from=builder /bin/gochat-contacts_server /gochat-contacts_server
 
 EXPOSE 8080
-ENTRYPOINT ["/gochat-contacts_server"] 
-
-CMD ["./gochat-contacts_server"]
+ENTRYPOINT ["/gochat-contacts_server"]

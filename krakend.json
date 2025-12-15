@@ -183,20 +183,12 @@
             "endpoint": "/profile",
             "@comment": "Get the profile of the authenticated user",
             "method": "GET",
+            "output_encoding": "no-op",
             "backend": [
                 {
                     "method": "GET",
                     "url_pattern": "/user/{JWT.sub}/profile",
                     "host": ["contacts:8080"]
-                },
-                {
-                    "method": "GET",
-                    "url_pattern": "/users/{JWT.sub}/presence",
-                    "host": ["presence:8080"],
-                    "encoding": "json",
-                    "mapping": {
-                        "user_id": "id"
-                    }
                 }
             ],
             "extra_config": {

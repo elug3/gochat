@@ -33,7 +33,7 @@ export async function requireUserId(request: Request) {
     return userId;
 }
 
-export async function requireProfile(request: Request): Promise<Profile> {
+export async function getProfile(request: Request): Promise<Profile | null> {
     const accessToken = await requireAccessToken(request);
     const res = await fetch(`${process.env.API_URL}/profile`, {
         headers: {
@@ -45,8 +45,8 @@ export async function requireProfile(request: Request): Promise<Profile> {
         throw redirect("/login");
     }
 
-    if (!res.ok) {
-        throw new Error("Failed to fetch profile");
+    if (res.status === 403 || !res.ok) {
+        return null;
     }
 
     const data = await res.json();
@@ -56,6 +56,14 @@ export async function requireProfile(request: Request): Promise<Profile> {
         name: data.name,
         status: data.status,
         avatarUrl: data.avatarUrl,
+    }
+    return profile;
+}
+
+export async function requireProfile(request: Request): Promise<Profile> {
+    const profile = await getProfile(request);
+    if (!profile) {
+        throw new Error("Profile not found");
     }
     return profile;
 }

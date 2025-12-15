@@ -6,7 +6,9 @@ services:
     command: ["-js"]
 
   contacts:
-    build: ./cmd/gochat-contacts_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-contacts_server/Dockerfile
     container_name: gochat-contacts_server
     environment:
       - NATS_URL=nats://nats-server:4222
@@ -14,14 +16,18 @@ services:
     depends_on:
       - nats-server
   auth:
-    build: ./cmd/gochat-auth_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-auth_server/Dockerfile
     container_name: gochat-auth_server
     environment:
       - NATS_URL=nats://nats-server:4222
     depends_on:
       - nats-server
   chatcmd:
-    build: ./cmd/gochat-chatcmd_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-chatcmd_server/Dockerfile
     container_name: gochat-chatcmd_server
     environment:
       - DB_URL=chatview-db:6379
@@ -30,7 +36,9 @@ services:
       - chatview-db
       - nats-server
   chatview:
-    build: ./cmd/gochat-chatview_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-chatview_server/Dockerfile
     container_name: gochat-chatview_server
     environment:
       - DB_URL=chatview-db:6379
@@ -39,7 +47,9 @@ services:
       - nats-server
       - chatview-db
   messages:
-    build: ./cmd/gochat-message_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-message_server/Dockerfile
     container_name: gochat-message_server
     environment:
       - CONTACTS_SERVER=contacts:8080
@@ -47,7 +57,9 @@ services:
     depends_on:
       - nats-server
   ws:
-    build: ./cmd/ws-server
+    build:
+      context: .
+      dockerfile: ./cmd/ws-server/Dockerfile
     container_name: ws-server
     environment:
       - AUTH_SERVER=auth:8080
@@ -92,7 +104,9 @@ services:
       timeout: 20s
       retries: 3
   presence:
-    build: ./cmd/gochat-presence_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-presence_server/Dockerfile
     container_name: gochat-presence_server
     environment:
       - NATS_URL=nats://nats-server:4222
@@ -101,7 +115,9 @@ services:
       - nats-server
       - presence-db
   presence-event:
-    build: ./cmd/gochat-presence_event_server
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-presence_event_server/Dockerfile
     container_name: gochat-presence_event_server
     environment:
       - NATS_URL=nats://nats-server:4222
