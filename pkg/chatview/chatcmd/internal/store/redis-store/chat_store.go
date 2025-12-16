@@ -57,6 +57,51 @@ func (store *ChatStore) CreateGroupChat(ctx context.Context, chatId int, groupNa
 	return nil
 }
 
+// DeleteChatMeta deletes chat metadata and all associated user chat references.
+func (store *ChatStore) DeleteChatMeta(ctx context.Context, chatId int) error {
+	keys := []string{
+		strconv.Itoa(chatId),
+	}
+	s, err := deleteChatMetaScript.Run(ctx, store.rdb, keys).Text()
+	if err != nil {
+		return err
+	}
+	res := struct {
+		Deleted int
+		Err     string
+	}{}
+	if err = json.Unmarshal([]byte(s), &res); err != nil {
+		return fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+	if res.Err != "" {
+		return fmt.Errorf("failed to delete chat meta: %s", res.Err)
+	}
+	return nil
+}
+
+// DeleteChatHistory deletes chat history in user chat list.
+func (store *ChatStore) DeleteChatHistory(ctx context.Context, chatId int, userId int32) error {
+	keys := []string{
+		strconv.FormatInt(int64(userId), 10),
+		strconv.Itoa(chatId),
+	}
+	s, err := deleteChatHistoryScript.Run(ctx, store.rdb, keys).Text()
+	if err != nil {
+		return err
+	}
+	res := struct {
+		Removed int
+		Err     string
+	}{}
+	if err = json.Unmarshal([]byte(s), &res); err != nil {
+		return fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+	if res.Err != "" {
+		return fmt.Errorf("failed to delete chat history: %s", res.Err)
+	}
+	return nil
+}
+
 func (store *ChatStore) AddChatToUser(ctx context.Context, userId int32, chatId int, timestamp int64) error {
 	keys := []string{
 		strconv.FormatInt(int64(userId), 10),

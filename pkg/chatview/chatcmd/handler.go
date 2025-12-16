@@ -24,7 +24,7 @@ func (s *ChatCommandHandler) OnGroupCreated(ctx context.Context, ev *events.Grou
 }
 
 func (s *ChatCommandHandler) OnGroupDeleted(ctx context.Context, ev *events.GroupDeleted) error {
-	return nil
+	return s.store.DeleteChatMeta(ctx, ev.GroupId)
 }
 
 func (s *ChatCommandHandler) OnMemberJoined(ctx context.Context, ev *events.MemberJoined) error {

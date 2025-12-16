@@ -18,9 +18,17 @@ var addChatToUserSrc string
 //go:embed scripts/update_last_read_seq.lua
 var updateLastReadSeqSrc string
 
+//go:embed scripts/delete_chat_meta.lua
+var deleteChatMetaSrc string
+
+//go:embed scripts/delete_chat_history.lua
+var deleteChatHistorySrc string
+
 var (
 	createGroupMetaScript   = redis.NewScript(createGroupMetaSrc)
 	updateLastMessageScript = redis.NewScript(updateLastMessageSrc)
 	addChatToUserScript     = redis.NewScript(addChatToUserSrc)
 	updateLastReadSeqScript = redis.NewScript(updateLastReadSeqSrc)
+	deleteChatMetaScript    = redis.NewScript(deleteChatMetaSrc)
+	deleteChatHistoryScript = redis.NewScript(deleteChatHistorySrc)
 )
