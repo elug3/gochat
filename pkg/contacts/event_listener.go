@@ -2,9 +2,9 @@ package contacts
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
+	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 )
 
@@ -14,7 +14,13 @@ type EventListener struct {
 }
 
 func NewEventListener(opts *Options) (*EventListener, error) {
-	eventSub, err := events.NewSubscriber(opts.NatsUrl)
+	eventSub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+		Durable:   events.DurableContacts,
+		AckPolicy: nats.AckExplicitPolicy,
+		FilterSubjects: []string{
+			events.SubjectUserRegistered,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -31,13 +37,14 @@ func NewEventListener(opts *Options) (*EventListener, error) {
 
 func (el *EventListener) Run(ctx context.Context) error {
 	log.Info().Msg("starting event listener")
-	err := el.eventSub.SubscribeStream("AUTH", "CONTACTS_AUTH", func(event events.Event) error {
+	err := el.eventSub.PullSubscribe(ctx, func(event events.Event) error {
 		var err error
 		switch ev := event.(type) {
 		case *events.UserRegistered:
 			err = el.handler.OnUserRegistered(ctx, ev)
 		default:
-			err = fmt.Errorf("unhandled event type: %T", ev)
+			log.Warn().Msgf("unhandled event type: %T", ev)
+			return nil
 		}
 
 		if err != nil {
@@ -51,6 +58,14 @@ func (el *EventListener) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		if err := el.eventSub.Drain(); err != nil {
+			log.Warn().Err(err).Msg("failed to drain event subscriber")
+		}
+		el.eventSub.Close()
+	}()
+
 	<-ctx.Done()
 	return nil
 }

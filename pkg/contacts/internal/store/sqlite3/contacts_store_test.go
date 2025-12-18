@@ -32,7 +32,7 @@ func TestProfileCRUD(t *testing.T) {
 	defer tx.Rollback()
 
 	// Test CreateProfile
-	createdProfile, err := store.CreateProfile(tx, userId, "test profile", "")
+	createdProfile, err := store.CreateProfile(tx, userId, "test profile")
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -127,7 +127,7 @@ func generateTestUserId() int32 {
 func generateTestProfile(t *testing.T, store *sqlite3.ContactsStore, tx *sql.Tx) *model.Profile {
 	t.Helper()
 
-	p, err := store.CreateProfile(tx, generateTestUserId(), "Test User", "")
+	p, err := store.CreateProfile(tx, generateTestUserId(), "Test User")
 	if err != nil {
 		t.Fatalf("failed to create test profile: %v", err)
 	}

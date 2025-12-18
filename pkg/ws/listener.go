@@ -2,41 +2,46 @@ package ws
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
+	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 )
 
 type EventListener struct {
-	sub     *events.Subscriber
-	handler *EventHandler
+	eventSub *events.Subscriber
+	handler  *EventHandler
 }
 
 func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
-	sub, err := events.NewSubscriber(opts.NatsUrl)
+	sub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+		Durable:     events.DurableWebsocket,
+		AckPolicy:   nats.AckExplicitPolicy,
+		Description: "websocket service consumer",
+		FilterSubjects: []string{
+			events.SubjectMessageSent,
+		},
+	})
 	if err != nil {
 		log.Error().Err(err).Msg("failed to create subscriber")
 		return nil, err
 	}
 
 	return &EventListener{
-		sub:     sub,
-		handler: NewEventHandler(hub),
+		eventSub: sub,
+		handler:  NewEventHandler(hub),
 	}, nil
 }
 
 func (el *EventListener) Run(ctx context.Context) error {
-	err := el.sub.SubscribeStream(events.StreamContacts, "WS_SERVER", el.handleEvent)
+	log.Info().Msg("starting websocket event listener")
+	err := el.eventSub.PullSubscribe(ctx, el.handleEvent)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to contacts stream: %w", err)
-	}
-	if err = el.sub.SubscribeStream(events.StreamMessages, "WS_SERVER", el.handleEvent); err != nil {
-		return fmt.Errorf("failed to subscribe to messages stream: %w", err)
+		log.Error().Err(err).Msg("failed to start websocket event listener")
+		return err
 	}
 
-	defer el.sub.Drain()
-
+	defer el.eventSub.Drain()
 	<-ctx.Done()
 	return nil
 }

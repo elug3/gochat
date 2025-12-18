@@ -296,7 +296,7 @@ func (store *ContactsStore) ListProfiles(tx *sql.Tx, limit int) ([]model.Profile
 	profiles := make([]model.Profile, 0)
 	for rows.Next() {
 		var profile model.Profile
-		if err = rows.Scan(&profile.Id, &profile.Name, &profile.IconUrl); err != nil {
+		if err = rows.Scan(&profile.Id, &profile.Name); err != nil {
 			return nil, err
 		}
 		profiles = append(profiles, profile)
@@ -308,7 +308,7 @@ func (store *ContactsStore) ListProfiles(tx *sql.Tx, limit int) ([]model.Profile
 	return profiles, nil
 }
 
-func (store *ContactsStore) CreateProfile(tx *sql.Tx, userId int32, name, iconUrl string) (*model.Profile, error) {
+func (store *ContactsStore) CreateProfile(tx *sql.Tx, userId int32, name string) (*model.Profile, error) {
 	exists, err := store.profileExists(tx, userId)
 	if err != nil {
 		return nil, err
@@ -318,13 +318,13 @@ func (store *ContactsStore) CreateProfile(tx *sql.Tx, userId int32, name, iconUr
 	}
 
 	row := tx.QueryRow(`
-	INSERT INTO profile (user_id, name, icon_url)
-	VALUES (?, ?, ?)
-	RETURNING user_id, name, icon_url;
-	`, userId, name, iconUrl)
+	INSERT INTO profile (user_id, name)
+	VALUES (?, ?)
+	RETURNING user_id, name;
+	`, userId, name)
 	var profile model.Profile
 
-	err = row.Scan(&profile.Id, &profile.Name, &profile.IconUrl)
+	err = row.Scan(&profile.Id, &profile.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +383,7 @@ func (store *ContactsStore) GetProfile(tx *sql.Tx, userId int32) (*model.Profile
 	SELECT user_id, name, icon_url
 	FROM profile
 	WHERE user_id = ?
-	`, userId).Scan(&profile.Id, &profile.Name, &profile.IconUrl)
+	`, userId).Scan(&profile.Id, &profile.Name)
 	if err != nil {
 		return nil, wrapErr(err)
 	}
@@ -521,65 +521,6 @@ func (store *ContactsStore) FindOwners(tx *sql.Tx, userId int32) ([]model.Member
 	return members, nil
 }
 
-// CreateProfileIconJob creates a job to upload the icon to S3
-// if icon uploaded and iconUrl is available, should call  DoneProfileIconJob to update the profile
-func (store *ContactsStore) CreateProfileIconJob(tx *sql.Tx, profileId int32) error {
-	_, err := tx.Exec(`
-	INSERT INTO icon_jobs (profile_id)
-	VALUES (?);
-	`, profileId)
-	if err != nil {
-		return wrapErr(err)
-	}
-	return nil
-}
-
-func (store *ContactsStore) ListProfileIconJobs(tx *sql.Tx) ([]model.IconJob, error) {
-	rows, err := tx.Query(`
-	SELECT id, profile_id, icon_url, created_at
-	FROM icon_jobs;
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	jobs := make([]model.IconJob, 0)
-	for rows.Next() {
-		var job model.IconJob
-		if err := rows.Scan(&job.Id, &job.ProfileId, &job.IconUrl, &job.CreatedAt); err != nil {
-			return nil, err
-		}
-		jobs = append(jobs, job)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return jobs, nil
-}
-
-// DoneProfileIconJob deletes the job and updates the profile icon url
-func (store *ContactsStore) DoneProfileIconJob(tx *sql.Tx, jobId int, iconUrl string) error {
-	var profileId int32
-	err := tx.QueryRow(`
-	DELETE FROM icon_jobs
-	WHERE id = ?
-	RETURNING profile_id;
-	`, jobId).Scan(&profileId)
-	if err != nil {
-		return wrapErr(err)
-	}
-
-	_, err = tx.Exec(`
-	UPDATE profile
-	SET icon_url = ?
-	WHERE user_id = ?;
-	`, iconUrl, profileId)
-	if err != nil {
-		return wrapErr(err)
-	}
-	return nil
-}
-
 // wrapErr converts sqlite3.Error to store.Error
 // if the error cannot be converted, it returns the original error
 func wrapErr(err error) error {
@@ -629,8 +570,7 @@ func initDB(db *sql.DB) (err error) {
 		"create table profile": `
 	CREATE TABLE IF NOT EXISTS profile (
 	user_id INTEGER PRIMARY KEY,
-	name varchar(20) NOT NULL,
-	icon_url varchar(255) NOT NULL
+	name varchar(20) NOT NULL
 	);`,
 		"create table groups": `
 	CREATE TABLE IF NOT EXISTS groups (
@@ -657,14 +597,6 @@ func initDB(db *sql.DB) (err error) {
 	created_at TIMESTAMP DEFAULT (datetime('now')),
 	FOREIGN KEY(owner_id) REFERENCES profile(user_id) ON DELETE CASCADE,
 	FOREIGN KEY(target_id) REFERENCES profile(user_id) ON DELETE CASCADE
-	);`,
-		"create table icon_jobs": `
-	CREATE TABLE IF NOT EXISTS icon_jobs (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	profile_id INTEGER NOT NULL,
-	icon_url VARCHAR(255),
-	created_at TIMESTAMP DEFAULT (datetime('now')),
-	FOREIGN KEY(profile_id) REFERENCES profile(user_id) ON DELETE CASCADE
 	);`,
 	}
 

@@ -3,6 +3,7 @@ package events
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -13,7 +14,14 @@ type Publisher struct {
 }
 
 func NewPublisher(natsUrl string) (*Publisher, error) {
-	nc, err := nats.Connect(natsUrl)
+	nc, err := nats.Connect(
+		natsUrl,
+		nats.Name("publisher"),
+		nats.Timeout(5*time.Second),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(500*time.Millisecond),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS server %s: %w", natsUrl, err)
 	}
@@ -21,133 +29,16 @@ func NewPublisher(natsUrl string) (*Publisher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := initStream(js); err != nil {
-		return nil, err
-	}
-	if err := initConsumers(js); err != nil {
-		return nil, err
-	}
 
-	return &Publisher{
-		nc: nc,
-		js: js,
-	}, nil
+	return &Publisher{nc: nc, js: js}, nil
 }
 
-func initStream(js nats.JetStreamContext) error {
-	if _, err := js.StreamInfo(StreamContacts); err != nil {
-		if err == nats.ErrStreamNotFound {
-			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     StreamContacts,
-				Subjects: []string{SubjectContactsAll},
-				Storage:  nats.FileStorage,
-			}); err != nil {
-				return fmt.Errorf("failed to create CONTACTS stream: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get CONTACTS stream info: %w", err)
-
-		}
+func (p *Publisher) Close() {
+	if p == nil || p.nc == nil {
+		return
 	}
-	if _, err := js.StreamInfo(StreamMessages); err != nil {
-		if err == nats.ErrStreamNotFound {
-			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     StreamMessages,
-				Subjects: []string{SubjectMessageAll},
-				Storage:  nats.FileStorage,
-			}); err != nil {
-				return fmt.Errorf("failed to create MESSAGES stream: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get MESSAGES stream info: %w", err)
-		}
-	}
-	if _, err := js.StreamInfo(StreamWebsocket); err != nil {
-		if err == nats.ErrStreamNotFound {
-			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:     StreamWebsocket,
-				Subjects: []string{SubjectWebsocketAll},
-				Storage:  nats.FileStorage,
-			}); err != nil {
-				return fmt.Errorf("failed to create WEBSOCKET stream: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get WEBSOCKET stream info: %w", err)
-		}
-	}
-	if _, err := js.StreamInfo(StreamAuth); err != nil {
-		if err == nats.ErrStreamNotFound {
-			if _, err = js.AddStream(&nats.StreamConfig{
-				Name:        StreamAuth,
-				Description: "authentication and user management events",
-				Subjects:    []string{SubjectAuthAll},
-				Storage:     nats.FileStorage,
-			}); err != nil {
-				return fmt.Errorf("failed to create AUTH stream: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get AUTH stream info: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func initConsumers(js nats.JetStreamContext) error {
-	cons := map[string]struct {
-		stream      string
-		description string
-		cfg         *nats.ConsumerConfig
-		opts        []nats.JSOpt
-	}{
-		"CHATCMD_CONTACTS": {
-			stream:      StreamContacts,
-			description: "chatview service consumes contacts events to update contact info",
-			cfg: &nats.ConsumerConfig{
-				Durable:   "CHATCMD_CONTACTS",
-				AckPolicy: nats.AckNonePolicy,
-			},
-		},
-		"CHATCMD_MESSAGES": {
-			stream:      StreamMessages,
-			description: "chatcmd service consumes messages to update last message state",
-			cfg: &nats.ConsumerConfig{
-				Durable:   "CHATCMD_MESSAGES",
-				AckPolicy: nats.AckNonePolicy,
-			},
-		},
-		"WEBSOCKET_MESSAGES": {
-			stream:      StreamWebsocket,
-			description: "message service consumes websocket events to send messages",
-			cfg: &nats.ConsumerConfig{
-				Durable:        "WEBSOCKET_MESSAGES",
-				FilterSubjects: SubjectsWebsocketMessage,
-				AckPolicy:      nats.AckExplicitPolicy,
-				MaxDeliver:     3,
-			},
-		},
-		"CONTACTS_USER_REGISTERED": {
-			stream:      StreamAuth,
-			description: "contacts service consumes user registered events to create user profile",
-			cfg: &nats.ConsumerConfig{
-				Durable:   "CONTACTS_USER_REGISTERED",
-				AckPolicy: nats.AckExplicitPolicy,
-			},
-		},
-	}
-
-	for name, con := range cons {
-		if _, err := js.ConsumerInfo(con.stream, name); err != nil {
-			if err == nats.ErrConsumerNotFound {
-				if _, err = js.AddConsumer(con.stream, con.cfg, con.opts...); err != nil {
-					return fmt.Errorf("failed to create %s consumer on %s stream: %w", name, con.stream, err)
-				}
-			} else {
-				return fmt.Errorf("failed to get consumer info: %w", err)
-			}
-		}
-	}
-	return nil
+	p.nc.Drain()
+	p.nc.Close()
 }
 
 func (p *Publisher) Publish(event Event) error {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/elug3/gochat/shared/events"
+	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,7 +30,14 @@ type EventServer struct {
 }
 
 func NewEventServer(opts *Options) (*EventServer, error) {
-	eventSub, err := events.NewSubscriber(opts.NatsUrl)
+	eventSub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+		Durable:     events.DurableMessage,
+		AckPolicy:   nats.AckExplicitPolicy,
+		Description: "message service consumer",
+		FilterSubjects: []string{
+			events.SubjectWebsocketSent,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +55,7 @@ func NewEventServer(opts *Options) (*EventServer, error) {
 
 func (srv *EventServer) Run(ctx context.Context) error {
 	// TODO: handle all type of messages (http, websocket)
-	srv.EventSub.SubscribeStream("WEBSOCKET", "messages", func(event events.Event) error {
+	err := srv.EventSub.PullSubscribe(ctx, func(event events.Event) error {
 		switch ev := event.(type) {
 		case *events.WebsocketSent:
 			_, err := srv.Messages.Send(ctx, ev.SenderId, ev.ChatId, ev.Content)
@@ -58,6 +66,16 @@ func (srv *EventServer) Run(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err := srv.EventSub.Drain(); err != nil {
+			log.Warn().Err(err).Msg("failed to drain event subscriber")
+		}
+		srv.EventSub.Close()
+	}()
 
 	<-ctx.Done()
 	return nil

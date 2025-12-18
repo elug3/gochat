@@ -13,25 +13,38 @@ const (
 	// SubjectUserRegistered is the subject for UserRegistered events.
 	SubjectUserRegistered = "auth.registered"
 
-	SubjectGroupCreated  = "contacts.group.created"
-	SubjectGroupDeleted  = "contacts.group.deleted"
-	SubjectMemberJoined  = "contacts.member.joined"
-	SubjectMemberLeft    = "contacts.member.left"
-	SubjectContactsReset = "contacts.reset"
-	SubjectMessageSent   = "message.sent"
-	SubjectMessageRead   = "message.read"
+	SubjectProfileCreated = "avatar.profile.created"
+	SubjectGroupCreated   = "contacts.group.created"
+	SubjectGroupDeleted   = "contacts.group.deleted"
+	SubjectMemberJoined   = "contacts.member.joined"
+	SubjectMemberLeft     = "contacts.member.left"
+	SubjectContactsReset  = "contacts.reset"
+	SubjectMessageSent    = "message.sent"
+	SubjectMessageRead    = "message.read"
 
 	SubjectWebsocketSent         = "websocket.sent"
 	SubjectWebsocketConnected    = "websocket.connected"
 	SubjectWebsocketDisconnected = "websocket.disconnected"
 )
 
-const (
-	SubjectUserAll      = "user.>"
-	SubjectContactsAll  = "contacts.>"
-	SubjectMessageAll   = "message.>"
-	SubjectWebsocketAll = "websocket.>"
-	SubjectAuthAll      = "auth.>"
+var (
+	SubjectContactsGroupAll  = "contacts.group.*"
+	SubjectContactsMemberAll = "contacts.member.*"
+	SubjectMessageAll        = "message.*"
+	SubjectWebsocketAll      = "websocket.*"
+)
+
+var (
+	APP_STREAM = "APP_STREAM"
+)
+
+var (
+	DurableChatView  = "CHATVIEW"
+	DurableContacts  = "CONTACTS"
+	DurableMessage   = "MESSAGE"
+	DurableWebsocket = "WEBSOCKET"
+	DurablePresence  = "PRESENCE"
+	DurableAvatar    = "AVATAR"
 )
 
 var (
@@ -39,19 +52,16 @@ var (
 	SubjectsWebsocketMessage = []string{SubjectWebsocketSent}
 )
 
-const (
-	StreamAuth      = "AUTH"
-	StreamContacts  = "CONTACTS"
-	StreamMessages  = "MESSAGES"
-	StreamWebsocket = "WEBSOCKET"
-	StreamPresence  = "PRESENCE"
-)
-
 // UserRegistered is published by AuthService after credentials are created for a user.
 type UserRegistered struct {
 	UserId    int32
 	Username  string
 	Timestamp int64
+}
+
+type ProfileCreated struct {
+	UserId    int32
+	TimeStamp int64
 }
 
 type GroupCreated struct {
@@ -157,6 +167,10 @@ func (WebsocketDisconnected) Subject() string {
 	return SubjectWebsocketDisconnected
 }
 
+func (ProfileCreated) Subject() string {
+	return SubjectProfileCreated
+}
+
 type EventFactory func() Event
 
 var subjects = map[string]EventFactory{
@@ -171,6 +185,7 @@ var subjects = map[string]EventFactory{
 	SubjectMessageRead:           func() Event { return &MessageRead{} },
 	SubjectWebsocketConnected:    func() Event { return &WebsocketConnected{} },
 	SubjectWebsocketDisconnected: func() Event { return &WebsocketDisconnected{} },
+	SubjectProfileCreated:        func() Event { return &ProfileCreated{} },
 }
 
 func UnmarshalEvent(subject string, data []byte) (Event, error) {

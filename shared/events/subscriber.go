@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,13 +11,15 @@ import (
 )
 
 type Subscriber struct {
-	nc *nats.Conn
-	js nats.JetStreamContext
+	nc      *nats.Conn
+	js      nats.JetStreamContext
+	stream  string
+	durable string
 }
 
 type HandlerFn func(event Event) error
 
-func NewSubscriber(natsUrl string) (*Subscriber, error) {
+func NewSubscriber(natsUrl string, stream string, cfg *nats.ConsumerConfig) (*Subscriber, error) {
 	nc, err := nats.Connect(natsUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Nats: %s: %w", natsUrl, err)
@@ -25,56 +28,75 @@ func NewSubscriber(natsUrl string) (*Subscriber, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get JetStream context: %w", err)
 	}
+
+	// if not exists, create consumer
+	if _, err = js.ConsumerInfo(stream, cfg.Durable); err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			nc.Close()
+			return nil, fmt.Errorf("failed to get stream info: %w", err)
+		}
+
+		// create consumer
+		if _, err = js.AddConsumer(stream, cfg); err != nil {
+			if _, infoErr := js.ConsumerInfo(stream, cfg.Durable); infoErr != nil {
+				nc.Close()
+				return nil, fmt.Errorf("failed to create consumer %s: %w", cfg.Durable, err)
+			}
+		}
+	}
+
 	return &Subscriber{
-		nc: nc,
-		js: js,
+		nc:      nc,
+		js:      js,
+		stream:  stream,
+		durable: cfg.Durable,
 	}, nil
 }
 
-func (s *Subscriber) SubscribeStream(stream, durable string, handler HandlerFn) error {
-	_, err := s.js.Subscribe(">", func(msg *nats.Msg) {
-		event, err := UnmarshalEvent(msg.Subject, msg.Data)
-		if err != nil {
-			fmt.Printf("failed to unmarshal event: %v\n", err)
-			// TODO: add unhandled message queue
-			if err = msg.Ack(); err != nil {
-				fmt.Printf("failed to ack message: %v\n", err)
+func (s *Subscriber) PullSubscribe(ctx context.Context, handler HandlerFn) error {
+	sub, err := s.js.PullSubscribe(
+		"", // subject ignored when binding to a durble consumer
+		s.durable,
+		nats.Bind(s.stream, s.durable),
+	)
+	if err != nil {
+		return err
+	}
+	go func(ctx context.Context) {
+		defer func() {
+			if err := sub.Unsubscribe(); err != nil {
+				log.Debug().Err(err).Msg("failed to unsubscribe nats subscription")
 			}
-			return
-		}
-		if err := handler(event); err != nil {
-			fmt.Printf("handler error: %v\n", err)
-			msg.NakWithDelay(time.Second * 3)
-			return
-		}
-		if err := msg.Ack(); err != nil {
-			fmt.Printf("failed to ack message: %v\n", err)
-			return
-		}
-	}, nats.Durable(durable), nats.ManualAck(), nats.BindStream(stream))
-	if err != nil {
-		return err
-	}
-	return nil
-}
+		}()
 
-func (s *Subscriber) PullSubscribeStream(ctx context.Context, subject, stream, durable string, handler HandlerFn) error {
-	sub, err := s.js.PullSubscribe(subject, durable, nats.BindStream(stream))
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			msgs, err := sub.Fetch(10, nats.MaxWait(time.Second*5))
+		for ctx.Err() == nil {
+			msgs, err := sub.Fetch(
+				10,
+				nats.MaxWait(5*time.Second),
+				nats.Context(ctx),
+			)
 			if err != nil {
-				if err == nats.ErrTimeout {
+				if errors.Is(err, nats.ErrTimeout) {
 					continue
 				}
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return
+				}
+
 				log.Warn().Msgf("failed to fetch messages: %v", err)
-				time.Sleep(time.Second * 3)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 				continue
 			}
+
 			for _, msg := range msgs {
+				if ctx.Err() != nil {
+					return
+				}
+
 				event, err := UnmarshalEvent(msg.Subject, msg.Data)
 				if err != nil {
 					log.Warn().Msgf("failed to unmarshal event: %v", err)
@@ -85,7 +107,7 @@ func (s *Subscriber) PullSubscribeStream(ctx context.Context, subject, stream, d
 				}
 				if err = handler(event); err != nil {
 					log.Warn().Msgf("handler error: %v", err)
-					msg.NakWithDelay(time.Second * 3)
+					msg.NakWithDelay(3 * time.Second)
 					continue
 				}
 				if err = msg.Ack(); err != nil {
@@ -94,7 +116,7 @@ func (s *Subscriber) PullSubscribeStream(ctx context.Context, subject, stream, d
 				}
 			}
 		}
-	}()
+	}(ctx)
 	return nil
 }
 

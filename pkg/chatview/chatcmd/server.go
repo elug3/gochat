@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
+	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 )
 
@@ -14,7 +15,16 @@ type ChatProjectionServer struct {
 }
 
 func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
-	subc, err := events.NewSubscriber(opts.NatsUrl)
+	subc, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+		Durable:     events.DurableChatView,
+		AckPolicy:   nats.AckExplicitPolicy,
+		Description: "chatview service consumer",
+		FilterSubjects: []string{
+			events.SubjectContactsGroupAll,
+			events.SubjectContactsMemberAll,
+			events.SubjectMessageAll,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -31,13 +41,11 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	log.Info().Msg("server started ...")
 
-	err := s.subc.PullSubscribeStream(ctx, ">", "CONTACTS", "CHATCMD_CONTACTS", s.handleEvent)
+	err := s.subc.PullSubscribe(ctx, func(event events.Event) error {
+		return s.handleEvent(ctx, event)
+	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to CONTACTS stream: %w", err)
-	}
-
-	if err = s.subc.PullSubscribeStream(ctx, ">", "MESSAGES", "CHATCMD_MESSAGES", s.handleEvent); err != nil {
-		return fmt.Errorf("failed to subscribe to MESSAGES stream: %w", err)
 	}
 
 	<-ctx.Done()
@@ -50,9 +58,7 @@ func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *ChatProjectionServer) handleEvent(event events.Event) error {
-	ctx := context.TODO()
-
+func (s *ChatProjectionServer) handleEvent(ctx context.Context, event events.Event) error {
 	var err error
 	switch ev := event.(type) {
 	case *events.GroupCreated:
@@ -70,12 +76,13 @@ func (s *ChatProjectionServer) handleEvent(event events.Event) error {
 	case *events.ContactsReset:
 		err = s.handler.OnContactsReset(ctx, ev)
 	default:
-		err = fmt.Errorf("unhandled event type: %T", ev)
+		log.Warn().Msgf("unhandled event type: %T", ev)
+		return nil
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("failed to handle event")
+		return err
 	}
 	log.Info().Msgf("handled event: %T", event)
-
-	return err
+	return nil
 }
