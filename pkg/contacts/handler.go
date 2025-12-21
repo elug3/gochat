@@ -20,7 +20,7 @@ type ContactsHandler struct {
 
 func (h *ContactsHandler) HandleListGroups(c *gin.Context) {
 	limit := parseLimit(c, DefaultListLimit)
-	
+
 	groups, err := h.contacts.ListGroups(c.Request.Context(), limit)
 	if err != nil {
 		respondError(c, err)
@@ -95,30 +95,34 @@ func (h *ContactsHandler) HandleCreateUserGroup(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.IndentedJSON(http.StatusOK, g)
+	c.IndentedJSON(http.StatusCreated, g)
 }
 
 func (h *ContactsHandler) HandleCreateProfile(c *gin.Context) {
+	uid, err := parseUserId(c)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
+		return
+	}
 	var req struct {
-		UserId int32  `json:"user_id" binding:"required"`
-		Name   string `json:"name" binding:"required"`
+		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	p, err := h.contacts.CreateProfile(c.Request.Context(), req.UserId, req.Name)
+	p, err := h.contacts.CreateProfile(c.Request.Context(), uid, req.Name)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.IndentedJSON(http.StatusOK, p)
+	c.IndentedJSON(http.StatusCreated, p)
 }
 
 func (h *ContactsHandler) HandleListProfiles(c *gin.Context) {
 	limit := parseLimit(c, DefaultListLimit)
-	
+
 	profiles, err := h.contacts.ListProfiles(c.Request.Context(), limit)
 	if err != nil {
 		respondError(c, err)
@@ -215,7 +219,7 @@ func (h *ContactsHandler) HandleAccess(c *gin.Context) {
 		TargetId int32  `form:"target_id"`
 		Action   string `form:"action"`
 	}
-	err := c.BindQuery(&req)
+	err := c.ShouldBindQuery(&req)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters"})
 		return
@@ -283,12 +287,30 @@ func (h *ContactsHandler) HandleCreateContact(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.IndentedJSON(http.StatusOK, contact)
+	c.IndentedJSON(http.StatusCreated, contact)
+}
+
+func (h *ContactsHandler) HandleDeleteGroup(c *gin.Context) {
+	gid, err := strconv.Atoi(c.Param("group_id"))
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid group_id parameter"})
+		return
+	}
+	uid, err := parseInt32(c.Param("user_id"))
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid user_id parameter"})
+		return
+	}
+	if err := h.contacts.DeleteUserGroup(c.Request.Context(), gid, uid); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *ContactsHandler) HandleHealth(c *gin.Context) {
 	health := h.contacts.HealthCheck(c.Request.Context())
-	
+
 	// Determine overall status
 	status := http.StatusOK
 	if dbStatus, ok := health["database"].(map[string]interface{}); ok {
@@ -296,7 +318,7 @@ func (h *ContactsHandler) HandleHealth(c *gin.Context) {
 			status = http.StatusServiceUnavailable
 		}
 	}
-	
+
 	c.JSON(status, health)
 }
 
@@ -311,28 +333,29 @@ func registerRoutes(router gin.IRouter, h *ContactsHandler) {
 	router.GET("/user/:user_id/groups", h.HandleListUserGroup)
 	router.POST("/user/:user_id/groups", h.HandleCreateUserGroup)
 	router.GET("/user/:user_id/profile", h.HandleGetProfile)
+	router.POST("/user/:user_id/profile", h.HandleCreateProfile)
 
 	router.GET("/user/:user_id/groups/:group_id", h.HandleGetUserGroup)
 	router.GET("/user/:user_id/groups/:group_id/members", h.HandleListGroupMembers)
 	router.POST("/user/:user_id/groups/:group_id/members", h.HandleInviteGroupMember)
+	router.DELETE("/user/:user_id/groups/:group_id", h.HandleDeleteGroup)
+
 	router.DELETE("/user/:user_id/groups/:group_id/members/:member_id", h.HandleRemoveGroupMember) // TODO: HandleRemoveGroupMember
 
 	router.GET("/user/:user_id/contacts", h.HandleListContacts)
 	router.POST("/user/:user_id/contacts", h.HandleCreateContact)
 
 	router.GET("/profiles", h.HandleListProfiles)
-	router.POST("/profiles", h.HandleCreateProfile)
 	router.DELETE("/profiles/:user_id", h.HandleDeleteProfile)
-
 }
 
 func newContactsHandler(contacts *ContactsService) *ContactsHandler {
 	router := gin.Default()
-	
+
 	// Add middleware
 	router.Use(requestIDMiddleware())
 	router.Use(loggingMiddleware())
-	
+
 	h := &ContactsHandler{
 		router:   router,
 		contacts: contacts,
@@ -348,11 +371,12 @@ func (h *ContactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func respondError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, errs.ErrPermissionDenied),
-		errors.Is(err, errs.ErrNotFound),
+	case errors.Is(err, errs.ErrPermissionDenied):
+		status = http.StatusForbidden
+	case errors.Is(err, errs.ErrNotFound),
 		errors.Is(err, errs.ErrGroupNotExists),
 		errors.Is(err, errs.ErrUserNotExists):
-		status = http.StatusForbidden
+		status = http.StatusNotFound
 	case errors.Is(err, errs.ErrExists):
 		status = http.StatusConflict
 	case errors.Is(err, errs.ErrSelfContact):
@@ -410,9 +434,10 @@ func loggingMiddleware() gin.HandlerFunc {
 		latency := time.Since(start)
 		status := c.Writer.Status()
 		requestID, _ := c.Get("request_id")
+		reqID, _ := requestID.(string)
 
 		log.Info().
-			Str("request_id", requestID.(string)).
+			Str("request_id", reqID).
 			Str("method", method).
 			Str("path", path).
 			Int("status", status).

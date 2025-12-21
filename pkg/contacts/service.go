@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/elug3/gochat/pkg/contacts/internal/store/s3"
 	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
-	"github.com/elug3/identicon"
 	"github.com/rs/zerolog/log"
 )
 
@@ -74,13 +72,13 @@ func NewContactsService(opts *Options) (*ContactsService, error) {
 	return &s, nil
 }
 
-func (s *ContactsService) publish(event events.Event, msg string, args ...interface{}) {
+func (s *ContactsService) publish(event events.Event, errMsg string, args ...interface{}) {
 	if s.pub == nil {
 		return
 	}
 
 	if err := s.pub.Publish(event); err != nil {
-		log.Err(err).Msgf(msg, args...)
+		log.Err(err).Msgf(errMsg, args...)
 	}
 }
 
@@ -394,17 +392,6 @@ func (s *ContactsService) ListProfiles(ctx context.Context, limit int) ([]model.
 	return profiles, nil
 }
 
-func (s *ContactsService) genNewIcon(ctx context.Context, userId int32) (url string, err error) {
-	idStr := strconv.FormatInt(int64(userId), 10)
-	img := identicon.New([]byte(idStr), 256)
-	err = s.iconStore.UploadIcon(ctx, idStr, img)
-	if err != nil {
-		return "", err
-	}
-	url = fmt.Sprintf("%s/profile-icons/%s.png", s.iconBaseURL, idStr)
-	return url, nil
-}
-
 func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name string) (*model.Profile, error) {
 	tx, err := s.store.Begin()
 	if err != nil {
@@ -413,19 +400,19 @@ func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name 
 
 	defer tx.Rollback()
 
-	iconUrl := ""
-	profile, err := s.store.CreateProfile(tx, userId, name, iconUrl)
+	profile, err := s.store.CreateProfile(tx, userId, name)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create profile for user '%d': %w", userId, err)
-	}
-
-	if err = s.store.CreateProfileIconJob(tx, userId); err != nil {
-		return nil, fmt.Errorf("cannot create profile icon job for user '%d': %w", userId, err)
 	}
 
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("cannot commit transaction: %w", err)
 	}
+
+	s.publish(events.ProfileCreated{
+		UserId:    userId,
+		TimeStamp: time.Now().Unix(),
+	}, "cannot publish ProfileCreated event for user '%d'", userId)
 
 	return profile, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog/log"
 )
 
 type Server struct {
@@ -87,14 +88,28 @@ func NewServer(opts *Options) (*Server, error) {
 }
 
 func (srv *Server) Run(ctx context.Context) error {
+	log.Info().Msg("starting avatar server event processing")
+
 	return srv.eventSub.PullSubscribe(ctx, srv.HandleEvents)
 }
 
 func (srv *Server) HandleEvents(event events.Event) error {
+	var err error
+	var handled bool
 	switch ev := event.(type) {
 	case *events.ProfileCreated:
-		return srv.handler.HandleProfileCreated(ev)
+		handled = true
+		err = srv.handler.HandleProfileCreated(ev)
 	default:
-		return nil
+		handled = false
 	}
+	if err != nil {
+		return fmt.Errorf("failed to handle event %T: %w", event, err)
+	}
+	if handled {
+		log.Info().Str("event", event.Subject()).Msg("handled event")
+	} else {
+		log.Warn().Str("event", event.Subject()).Msg("unhandled event")
+	}
+	return nil
 }

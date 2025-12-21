@@ -86,23 +86,6 @@ services:
     image: redis:8.2
     container_name: chatview-db
 
-  bucket:
-    image: quay.io/minio/minio:latest
-    container_name: minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
   presence:
     build:
       context: .
@@ -128,19 +111,69 @@ services:
   presence-db:
     image: redis:8.2
     container_name: presence-db
-
-  mc:
-    image: quay.io/minio/mc:latest
-    container_name: minio_mc
+  avatar:
+    build:
+      context: .
+      dockerfile: ./cmd/gochat-avatar_server/Dockerfile
+    container_name: gochat-avatar_server
+    environment:
+      - NATS_URL=nats://nats-server:4222
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
     depends_on:
-      - bucket
+      - nats-server
+      - minio
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      sleep 5 &&
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb -p local/profile-icons &&
-      mc anonymous set public local/profile-icons &&
-      tail -f /dev/null
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
+
+      # create bucket if it doesn't exist
+      mc mb -p local/avatars || true;
+
+      # set bucket policy: public download (public read)
+      mc anonymous set download local/avatars;
+
+      echo 'MinIO buckets/policies initialized.';
+      "
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+  nats-init:
+    image: synadia/nats-server:nightly-20251218
+    container_name: nats-init
+    depends_on:
+      - nats-server
+    entrypoint: >
+      sh -c "
+      echo 'Creating APP_STREAM (if not exists)...';
+      nats --server nats:4222 stream add APP_STREAM --subjects 'CONTACTS.>' --subjects 'AUTH.>' --subjects 'MESSAGE.>' --storage file --retention limits --max-msgs -1 --max-bytes -1 --max-age 72h --discard old || true;
+
+      echo 'Done.'-
+
       "
 
 volumes:

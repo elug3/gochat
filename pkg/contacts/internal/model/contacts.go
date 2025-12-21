@@ -7,10 +7,10 @@ import (
 )
 
 type Profile struct {
-	Id       int32      `json:"id"`
-	Name     string     `json:"name"`
-	Birthday *time.Time `json:"birthday,omitempty"`
-	IconUrl  string     `json:"icon_url,omitempty"`
+	Id        int32      `json:"id"`
+	Name      string     `json:"name"`
+	Birthday  *time.Time `json:"birthday,omitempty"`
+	AvatarUrl string     `json:"avatar,omitempty"`
 }
 
 type Group struct {

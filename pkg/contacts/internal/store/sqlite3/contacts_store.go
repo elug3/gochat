@@ -380,7 +380,7 @@ func (store *ContactsStore) DeleteProfile(tx *sql.Tx, id int32) error {
 func (store *ContactsStore) GetProfile(tx *sql.Tx, userId int32) (*model.Profile, error) {
 	var profile model.Profile
 	err := tx.QueryRow(`
-	SELECT user_id, name, icon_url
+	SELECT user_id, name
 	FROM profile
 	WHERE user_id = ?
 	`, userId).Scan(&profile.Id, &profile.Name)
