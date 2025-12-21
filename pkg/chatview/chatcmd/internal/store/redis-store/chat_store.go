@@ -67,8 +67,10 @@ func (store *ChatStore) DeleteChatMeta(ctx context.Context, chatId int) error {
 		return err
 	}
 	res := struct {
-		Deleted int
-		Err     string
+		DeletedMeta      int    `json:"deleted_meta"`
+		RemovedUserChats int    `json:"removed_user_chats"`
+		DeletedStates    int    `json:"deleted_states"`
+		Err              string `json:"err"`
 	}{}
 	if err = json.Unmarshal([]byte(s), &res); err != nil {
 		return fmt.Errorf("failed to unmarshal result: %w", err)

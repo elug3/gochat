@@ -2,7 +2,6 @@ package chatcmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
@@ -41,21 +40,6 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
 	log.Info().Msg("server started ...")
 
-	err := s.subc.PullSubscribe(ctx, func(event events.Event) error {
-		return s.handleEvent(ctx, event)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to CONTACTS stream: %w", err)
-	}
-
-	<-ctx.Done()
-	log.Info().Msg("shutting down server ...")
-	if err := s.subc.Drain(); err != nil {
-		return err
-	}
-	s.subc.Close()
-	log.Info().Msg("server shut down")
-	return nil
 }
 
 func (s *ChatProjectionServer) handleEvent(ctx context.Context, event events.Event) error {
