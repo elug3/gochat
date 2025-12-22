@@ -81,6 +81,24 @@ func TestCreateUser(t *testing.T) {
 	}
 }
 
+func TestRegisterUserTwiceFails(t *testing.T) {
+	service, err := newTestService(t)
+	if err != nil {
+		t.Fatalf("failed to create test service: %v", err)
+	}
+
+	username := genRandomUsername()
+	password := "password"
+
+	if _, err := service.RegisterUser(t.Context(), username, password, "test"); err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+
+	if _, err := service.RegisterUser(t.Context(), username, password, "test"); errors.Is(err, errs.ErrConstraint) == false {
+		t.Fatalf("expected ErrConstraint when registering duplicate user, got: %v", err)
+	}
+}
+
 func TestPassword(t *testing.T) {
 	service, err := newTestService(t)
 	if err != nil {
