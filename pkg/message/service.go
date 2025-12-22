@@ -8,7 +8,6 @@ import (
 	"github.com/elug3/gochat/pkg/message/internal/errs"
 	"github.com/elug3/gochat/pkg/message/internal/model"
 	"github.com/elug3/gochat/pkg/message/internal/store"
-	"github.com/elug3/gochat/pkg/message/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
 )
 
@@ -18,24 +17,26 @@ type MessageService struct {
 	pub      *events.Publisher
 }
 
-func NewMessageService(opts *Options) (*MessageService, error) {
+type ServiceDeps struct {
+	Store     store.MessageStore
+	Publisher *events.Publisher
+	Contacts  *httpclient.ContactsClient
+}
 
-	store, err := sqlite3.NewMessageStore(opts.SaveDir, opts.NoSave)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create message store: %w", err)
+func NewMessageService(deps ServiceDeps) (*MessageService, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("message store is required")
 	}
-	pub, err := events.NewPublisher(opts.NatsUrl)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create event publisher: %w", err)
+	if deps.Contacts == nil {
+		return nil, fmt.Errorf("contacts client is required")
 	}
-
-	contactsClient := httpclient.NewContactsClient(
-		httpclient.WithBaseUrl(opts.ContactsServerUrl),
-	)
+	if deps.Publisher == nil {
+		return nil, fmt.Errorf("event publisher is required")
+	}
 	s := MessageService{
-		store:    store,
-		pub:      pub,
-		contacts: contactsClient,
+		store:    deps.Store,
+		pub:      deps.Publisher,
+		contacts: deps.Contacts,
 	}
 	return &s, nil
 }

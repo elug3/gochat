@@ -27,11 +27,15 @@ func newTestHTTPServer(t *testing.T) *httptest.Server {
 
 	gin.SetMode(gin.TestMode)
 
-	service, err := NewAuthService(&Options{
+	deps, err := NewServiceDeps(&Options{
 		UseTmpKey: true,
 		InMemory:  true,
 		NoEvents:  true,
 	})
+	if err != nil {
+		t.Fatalf("failed to create auth service deps: %v", err)
+	}
+	service, err := NewAuthService(deps)
 	if err != nil {
 		t.Fatalf("failed to create auth service: %v", err)
 	}

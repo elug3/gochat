@@ -13,7 +13,11 @@ type HttpServer struct {
 
 func NewHttpServer(opts *Options) (*HttpServer, error) {
 	addr := net.JoinHostPort(opts.Host, opts.Port)
-	s, err := NewAuthService(opts)
+	deps, err := NewServiceDeps(opts)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewAuthService(deps)
 	if err != nil {
 		return nil, err
 	}

@@ -14,11 +14,15 @@ import (
 func newTestService(t *testing.T) (*auth.AuthService, error) {
 	t.Helper()
 
-	service, err := auth.NewAuthService(&auth.Options{
+	deps, err := auth.NewServiceDeps(&auth.Options{
 		UseTmpKey: true,
 		InMemory:  true,
 		NoEvents:  true,
 	})
+	if err != nil {
+		return nil, err
+	}
+	service, err := auth.NewAuthService(deps)
 	if err != nil {
 		return nil, err
 	}

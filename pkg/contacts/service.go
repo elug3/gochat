@@ -31,41 +31,29 @@ type ContactsService struct {
 	iconBaseURL string
 }
 
+type ServiceDeps struct {
+	Store       *sqlite3.ContactsStore
+	Publisher   *events.Publisher
+	IconStore   *s3.IconStore
+	IconBaseURL string
+	IsNewStore  bool
+}
+
 var contactsResetOnce sync.Once
 
-func NewContactsService(opts *Options) (*ContactsService, error) {
-	var (
-		pub       *events.Publisher
-		iconStore *s3.IconStore
-	)
-	contactsStore, isNewStore, err := sqlite3.NewContactsStore(opts.SaveDir, opts.NoSave)
-	if err != nil {
-		return nil, err
-	}
-
-	if !opts.NoEvent {
-		pub, err = events.NewPublisher(opts.NatsUrl)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create event publisher: %w", err)
-		}
-	}
-
-	if !opts.NoIcons {
-		iconStore, err = s3.NewIconStore(opts.S3Endpoint, opts.S3AccessKey, opts.S3SecretKey, opts.S3Region)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create s3 icon store: %w", err)
-		}
+func NewContactsService(deps ServiceDeps) (*ContactsService, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("contacts store is required")
 	}
 
 	s := ContactsService{
-		store:       contactsStore,
-		iconStore:   iconStore,
-		pub:         pub,
-		iconBaseURL: opts.IconBaseURL,
+		store:       deps.Store,
+		iconStore:   deps.IconStore,
+		pub:         deps.Publisher,
+		iconBaseURL: deps.IconBaseURL,
 	}
 
-	// if isNewStore, publish reset event
-	if isNewStore {
+	if deps.IsNewStore {
 		log.Info().Msg("new contacts store created")
 		s.publishResetEvent()
 	}

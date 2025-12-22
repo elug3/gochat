@@ -6,20 +6,18 @@ import (
 	"fmt"
 
 	"github.com/elug3/gochat/pkg/presence/internal/model"
-	"github.com/elug3/gochat/pkg/presence/internal/store/redisstore"
 	"github.com/elug3/gochat/shared/events"
 )
 
 type EventHandler struct {
-	store *redisstore.PresenceStore
+	presences *PresenceService
 }
 
-func NewEventHandler(opts *EventOptions) (*EventHandler, error) {
-	store, err := redisstore.NewPresenceStore(opts.RedisAddr)
-	if err != nil {
-		return nil, err
+func NewEventHandler(presences *PresenceService) (*EventHandler, error) {
+	if presences == nil {
+		return nil, fmt.Errorf("presence service is required")
 	}
-	return &EventHandler{store: store}, nil
+	return &EventHandler{presences: presences}, nil
 }
 
 func (h *EventHandler) OnConnected(ctx context.Context, subject string, data []byte) error {
@@ -28,7 +26,7 @@ func (h *EventHandler) OnConnected(ctx context.Context, subject string, data []b
 		return fmt.Errorf("unmarshal event data: %w", err)
 	}
 	if event.IsFirst {
-		err := h.store.SetUserPresence(ctx, event.UserId, model.StateOnline)
+		err := h.presences.SetPresence(ctx, event.UserId, model.StateOnline)
 		if err != nil {
 			return err
 		}
@@ -42,7 +40,7 @@ func (h *EventHandler) OnDisconnected(ctx context.Context, subject string, data 
 		return fmt.Errorf("unmarshal event data: %w", err)
 	}
 	if event.IsLast {
-		err := h.store.SetUserPresence(ctx, event.UserId, model.StateOffline)
+		err := h.presences.SetPresence(ctx, event.UserId, model.StateOffline)
 		if err != nil {
 			return err
 		}

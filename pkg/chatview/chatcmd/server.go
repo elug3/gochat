@@ -3,7 +3,9 @@ package chatcmd
 import (
 	"context"
 	"os"
+	"sync"
 
+	redisstore "github.com/elug3/gochat/pkg/chatview/chatcmd/internal/store/redis-store"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
@@ -13,6 +15,11 @@ import (
 type ChatProjectionServer struct {
 	sub     *events.Subscriber
 	handler *ChatCommandHandler
+	nc      *nats.Conn
+
+	shutdownOnce sync.Once
+	wg           sync.WaitGroup
+	Cancel       context.CancelFunc
 }
 
 func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
@@ -37,7 +44,11 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	handler, err := NewChatCommandHandler(opts)
+	store, err := redisstore.NewChatStore(opts.DatabaseUrl)
+	if err != nil {
+		return nil, err
+	}
+	handler, err := NewChatCommandHandler(store)
 	if err != nil {
 		return nil, err
 	}
@@ -45,13 +56,20 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 	return &ChatProjectionServer{
 		sub:     sub,
 		handler: handler,
+		nc:      nc,
 	}, nil
 }
 
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
-	defer s.Close()
+	runCtx, cancel := context.WithCancel(ctx)
+	s.Cancel = cancel
+	s.wg.Add(1)
+	defer func() {
+		s.wg.Done()
+		s.Shutdown(context.Background())
+	}()
 
-	return s.sub.Run(ctx)
+	return s.sub.Run(runCtx)
 }
 
 func registerHandlers(sub *events.Subscriber, h *ChatCommandHandler) {
@@ -64,8 +82,33 @@ func registerHandlers(sub *events.Subscriber, h *ChatCommandHandler) {
 	sub.HandleFunc(events.SubjectMessageRead, h.OnMessageRead)
 }
 
-func (s *ChatProjectionServer) Close() {
-	if s.sub != nil {
-		s.sub.Close()
+func (s *ChatProjectionServer) Shutdown(ctx context.Context) {
+	if s == nil {
+		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.shutdownOnce.Do(func() {
+		if s.Cancel != nil {
+			s.Cancel()
+		}
+		if s.sub != nil {
+			_ = s.sub.Close()
+		}
+		if s.nc != nil && !s.nc.IsClosed() {
+			s.nc.Close()
+		}
+
+		done := make(chan struct{})
+		go func() {
+			s.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	})
 }

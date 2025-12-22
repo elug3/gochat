@@ -6,7 +6,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 
+	"github.com/elug3/gochat/api/httpclient"
+	"github.com/elug3/gochat/pkg/message/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
@@ -14,7 +17,11 @@ import (
 
 func NewHttpServer(opts *Options) (*http.Server, error) {
 	addr := net.JoinHostPort(opts.Host, opts.Port)
-	s, err := NewMessageService(opts)
+	deps, err := newMessageServiceDeps(opts)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewMessageService(deps)
 	if err != nil {
 		return nil, err
 	}
@@ -29,6 +36,11 @@ func NewHttpServer(opts *Options) (*http.Server, error) {
 type EventServer struct {
 	EventSub *events.Subscriber
 	Messages *MessageService
+	nc       *nats.Conn
+
+	shutdownOnce sync.Once
+	wg           sync.WaitGroup
+	Cancel       context.CancelFunc
 }
 
 func NewEventServer(opts *Options) (*EventServer, error) {
@@ -49,7 +61,11 @@ func NewEventServer(opts *Options) (*EventServer, error) {
 		return nil, err
 	}
 
-	s, err := NewMessageService(opts)
+	deps, err := newMessageServiceDeps(opts)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewMessageService(deps)
 	if err != nil {
 		return nil, err
 	}
@@ -57,17 +73,37 @@ func NewEventServer(opts *Options) (*EventServer, error) {
 	return &EventServer{
 		EventSub: eventSub,
 		Messages: s,
+		nc:       nc,
 	}, nil
 }
 
-func (srv *EventServer) Close() {
-	if srv.EventSub != nil {
-		srv.EventSub.Close()
+func newMessageServiceDeps(opts *Options) (ServiceDeps, error) {
+	store, err := sqlite3.NewMessageStore(opts.SaveDir, opts.NoSave)
+	if err != nil {
+		return ServiceDeps{}, err
 	}
+	pub, err := events.NewPublisher(opts.NatsUrl)
+	if err != nil {
+		return ServiceDeps{}, err
+	}
+	contactsClient := httpclient.NewContactsClient(
+		httpclient.WithBaseUrl(opts.ContactsServerUrl),
+	)
+	return ServiceDeps{
+		Store:     store,
+		Publisher: pub,
+		Contacts:  contactsClient,
+	}, nil
 }
 
 func (srv *EventServer) Run(ctx context.Context) error {
-	defer srv.Close()
+	runCtx, cancel := context.WithCancel(ctx)
+	srv.Cancel = cancel
+	srv.wg.Add(1)
+	defer func() {
+		srv.wg.Done()
+		srv.Shutdown(context.Background())
+	}()
 
 	srv.EventSub.HandleFunc(events.SubjectWebsocketSent, func(ctx context.Context, subject string, data []byte) error {
 		var event events.WebsocketSent
@@ -80,7 +116,38 @@ func (srv *EventServer) Run(ctx context.Context) error {
 		}
 		return nil
 	})
-	return srv.EventSub.Run(ctx)
+	return srv.EventSub.Run(runCtx)
+}
+
+func (srv *EventServer) Shutdown(ctx context.Context) {
+	if srv == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	srv.shutdownOnce.Do(func() {
+		if srv.Cancel != nil {
+			srv.Cancel()
+		}
+		if srv.EventSub != nil {
+			_ = srv.EventSub.Close()
+		}
+		if srv.nc != nil && !srv.nc.IsClosed() {
+			srv.nc.Close()
+		}
+
+		done := make(chan struct{})
+		go func() {
+			srv.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	})
 }
 
 // func (srv *EventServer) Run(ctx context.Context) error {

@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/elug3/gochat/pkg/users/internal/store/sqlite3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -13,7 +14,11 @@ type HttpServer struct {
 }
 
 func NewHttpServer(opts *Options) (*HttpServer, error) {
-	s, err := NewUserService()
+	store, err := sqlite3.NewUserStore()
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewUserService(ServiceDeps{Store: store})
 	if err != nil {
 		return nil, err
 	}

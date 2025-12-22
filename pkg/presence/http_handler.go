@@ -13,10 +13,9 @@ type Handler struct {
 	Presences *PresenceService
 }
 
-func NewHttpHandler(opts *HttpOptions) (*Handler, error) {
-	presences, err := NewPresenceService(opts)
-	if err != nil {
-		return nil, err
+func NewHttpHandler(presences *PresenceService) (*Handler, error) {
+	if presences == nil {
+		return nil, fmt.Errorf("presence service is required")
 	}
 	router := gin.Default()
 	h := Handler{

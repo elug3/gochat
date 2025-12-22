@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"os"
+	"sync"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
@@ -13,6 +14,10 @@ import (
 type EventListener struct {
 	eventSub *events.Subscriber
 	handler  *EventHandler
+
+	shutdownOnce sync.Once
+	wg           sync.WaitGroup
+	Cancel       context.CancelFunc
 }
 
 func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
@@ -42,14 +47,43 @@ func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
 }
 
 func (el *EventListener) Run(ctx context.Context) error {
-	defer el.Close()
+	runCtx, cancel := context.WithCancel(ctx)
+	el.Cancel = cancel
+	el.wg.Add(1)
+	defer func() {
+		el.wg.Done()
+		el.Shutdown(context.Background())
+	}()
+
 	el.eventSub.HandleFunc(events.SubjectMessageSent, el.handler.OnMessageSent)
 
-	return el.eventSub.Run(ctx)
+	return el.eventSub.Run(runCtx)
 }
 
-func (el *EventListener) Close() {
-	if el.eventSub != nil {
-		el.eventSub.Close()
+func (el *EventListener) Shutdown(ctx context.Context) {
+	if el == nil {
+		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	el.shutdownOnce.Do(func() {
+		if el.Cancel != nil {
+			el.Cancel()
+		}
+		if el.eventSub != nil {
+			_ = el.eventSub.Close()
+		}
+
+		done := make(chan struct{})
+		go func() {
+			el.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	})
 }

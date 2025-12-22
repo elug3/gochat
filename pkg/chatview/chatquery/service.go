@@ -2,23 +2,26 @@ package chatquery
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elug3/gochat/pkg/chatview/chatquery/internal/model"
 	"github.com/elug3/gochat/pkg/chatview/chatquery/internal/store"
-	redisstore "github.com/elug3/gochat/pkg/chatview/chatquery/internal/store/redis-store"
 )
 
 type ChatViewService struct {
 	store store.ChatViewStore
 }
 
-func NewChatViewService(opts *Options) (*ChatViewService, error) {
-	store, err := redisstore.NewChatViewStore(opts.DatabaseURL)
-	if err != nil {
-		return nil, err
+type ServiceDeps struct {
+	Store store.ChatViewStore
+}
+
+func NewChatViewService(deps ServiceDeps) (*ChatViewService, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("chat view store is required")
 	}
 	return &ChatViewService{
-		store: store,
+		store: deps.Store,
 	}, nil
 }
 

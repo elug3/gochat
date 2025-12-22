@@ -13,10 +13,9 @@ type PresenceService struct {
 	store *redisstore.PresenceStore
 }
 
-func NewPresenceService(opts *HttpOptions) (*PresenceService, error) {
-	store, err := redisstore.NewPresenceStore(opts.RedisAddr)
-	if err != nil {
-		return nil, err
+func NewPresenceService(store *redisstore.PresenceStore) (*PresenceService, error) {
+	if store == nil {
+		return nil, fmt.Errorf("presence store is required")
 	}
 	return &PresenceService{
 		store: store,

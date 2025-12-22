@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,6 +23,10 @@ type Server struct {
 	logger   *zerolog.Logger
 	nc       *nats.Conn
 	handler  *Handler
+
+	shutdownOnce sync.Once
+	wg           sync.WaitGroup
+	Cancel       context.CancelFunc
 }
 
 func NewServer(opts *Options) (*Server, error) {
@@ -100,20 +105,48 @@ func NewServer(opts *Options) (*Server, error) {
 }
 
 func (srv *Server) Run(ctx context.Context) error {
-	defer srv.Close()
+	runCtx, cancel := context.WithCancel(ctx)
+	srv.Cancel = cancel
+	srv.wg.Add(1)
+	defer func() {
+		srv.wg.Done()
+		srv.Shutdown(context.Background())
+	}()
 	srv.eventSub.HandleFunc(events.SubjectProfileCreated, srv.handler.HandleProfileCreated)
-	err := srv.eventSub.Run(ctx)
+	err := srv.eventSub.Run(runCtx)
 	if err != nil {
 		return fmt.Errorf("failed to run event subscriber: %w", err)
 	}
 	return err
 }
 
-func (srv *Server) Close() {
-	if srv.eventSub != nil {
-		srv.eventSub.Close()
+func (srv *Server) Shutdown(ctx context.Context) {
+	if srv == nil {
+		return
 	}
-	if srv.nc != nil && !srv.nc.IsClosed() {
-		srv.nc.Close()
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	srv.shutdownOnce.Do(func() {
+		if srv.Cancel != nil {
+			srv.Cancel()
+		}
+		if srv.eventSub != nil {
+			_ = srv.eventSub.Close()
+		}
+		if srv.nc != nil && !srv.nc.IsClosed() {
+			srv.nc.Close()
+		}
+
+		done := make(chan struct{})
+		go func() {
+			srv.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	})
 }

@@ -7,17 +7,19 @@ import (
 	"github.com/elug3/gochat/pkg/contacts/access"
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
 	"github.com/elug3/gochat/pkg/contacts/internal/model"
+	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
 )
-
-var testOptions = &Options{
-	NoSave:  true,
-	NoEvent: true,
-	NoIcons: true,
-}
 
 func NewTestService(t *testing.T) *ContactsService {
 	t.Helper()
-	s, err := NewContactsService(testOptions)
+	contactsStore, isNewStore, err := sqlite3.NewContactsStore("", true)
+	if err != nil {
+		t.Fatalf("failed to create contacts store: %v", err)
+	}
+	s, err := NewContactsService(ServiceDeps{
+		Store:      contactsStore,
+		IsNewStore: isNewStore,
+	})
 	if err != nil {
 		t.Fatalf("failed to create contacts service: %v", err)
 	}

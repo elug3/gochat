@@ -3,6 +3,7 @@ package chatcmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	redisstore "github.com/elug3/gochat/pkg/chatview/chatcmd/internal/store/redis-store"
 	"github.com/elug3/gochat/shared/events"
@@ -12,10 +13,9 @@ type ChatCommandHandler struct {
 	store *redisstore.ChatStore
 }
 
-func NewChatCommandHandler(opts *Options) (*ChatCommandHandler, error) {
-	store, err := redisstore.NewChatStore(opts.DatabaseUrl)
-	if err != nil {
-		return nil, err
+func NewChatCommandHandler(store *redisstore.ChatStore) (*ChatCommandHandler, error) {
+	if store == nil {
+		return nil, fmt.Errorf("chat store is required")
 	}
 	return &ChatCommandHandler{store: store}, nil
 }

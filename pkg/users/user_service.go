@@ -6,22 +6,22 @@ import (
 
 	"github.com/elug3/gochat/pkg/users/internal/model"
 	"github.com/elug3/gochat/pkg/users/internal/store"
-	"github.com/elug3/gochat/pkg/users/internal/store/sqlite3"
 )
 
 type UserService struct {
 	store store.UserStore
 }
 
-func NewUserService() (*UserService, error) {
-	// user store
-	store, err := sqlite3.NewUserStore()
-	if err != nil {
-		return nil, fmt.Errorf("cannot create user store: %w", err)
-	}
+type ServiceDeps struct {
+	Store store.UserStore
+}
 
+func NewUserService(deps ServiceDeps) (*UserService, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("user store is required")
+	}
 	return &UserService{
-		store: store,
+		store: deps.Store,
 	}, nil
 }
 

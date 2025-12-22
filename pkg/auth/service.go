@@ -40,6 +40,15 @@ type AuthService struct {
 	eventPub *events.Publisher
 }
 
+type ServiceDeps struct {
+	Store    *sqlite3.AuthStore
+	JWTKey   *rsa.PrivateKey
+	Jwks     *jwk.Jwks
+	WsTokens *cache.Cache
+	WebAuthn *webauthn.WebAuthn
+	EventPub *events.Publisher
+}
+
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	keyData, err := os.ReadFile(path)
 	if err != nil {
@@ -58,14 +67,40 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	return rsaKey, nil
 }
 
-func NewAuthService(opts *Options) (*AuthService, error) {
+func NewAuthService(deps ServiceDeps) (*AuthService, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("auth store is required")
+	}
+	if deps.JWTKey == nil {
+		return nil, fmt.Errorf("jwt key is required")
+	}
+	if deps.Jwks == nil {
+		return nil, fmt.Errorf("jwks is required")
+	}
+	if deps.WsTokens == nil {
+		return nil, fmt.Errorf("ws token cache is required")
+	}
+	if deps.WebAuthn == nil {
+		return nil, fmt.Errorf("webauthn is required")
+	}
+	return &AuthService{
+		store:    deps.Store,
+		db:       deps.Store.DB(),
+		jwtKey:   deps.JWTKey,
+		jwks:     deps.Jwks,
+		wsTokens: deps.WsTokens,
+		eventPub: deps.EventPub,
+		wAuth:    deps.WebAuthn,
+	}, nil
+}
+
+func NewServiceDeps(opts *Options) (ServiceDeps, error) {
 	var (
 		jwtKey   *rsa.PrivateKey
 		eventPub *events.Publisher
 		err      error
 	)
 
-	// load private key
 	if opts.UseTmpKey {
 		log.Warn().Msg("using temporary RSA key, not recommended for production")
 		jwtKey, err = rsa.GenerateKey(rand.Reader, 2048)
@@ -73,47 +108,42 @@ func NewAuthService(opts *Options) (*AuthService, error) {
 		jwtKey, err = loadPrivateKey(opts.KeyPath)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to load RSA private key: %w", err)
+		return ServiceDeps{}, fmt.Errorf("failed to load RSA private key: %w", err)
 	}
 
-	// nats
 	if !opts.NoEvents {
 		eventPub, err = events.NewPublisher(opts.NatsUrl)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to NATS server: %w", err)
+			return ServiceDeps{}, fmt.Errorf("failed to connect to NATS server: %w", err)
 		}
 	}
 
-	// jwk
 	jwks := jwk.NewJwks()
-	err = jwks.AddKey(jwtKey.PublicKey, "key1")
-	if err != nil {
-		return nil, fmt.Errorf("failed to add key to JWKs: %w", err)
+	if err = jwks.AddKey(jwtKey.PublicKey, "key1"); err != nil {
+		return ServiceDeps{}, fmt.Errorf("failed to add key to JWKs: %w", err)
 	}
 
-	// store
 	store, err := sqlite3.NewAuthStore(opts.SaveDir, opts.InMemory)
 	if err != nil {
-		return nil, err
+		return ServiceDeps{}, err
 	}
 
 	wAuth, err := webauthn.New(&webauthn.Config{
-		RPDisplayName: opts.RPDisplayName, // Display Name for your site
-		RPID:          opts.RPID,          // Generally the domain name for your site
-		RPOrigins:     opts.RPOrigins,     // The origin URL for WebAuthn requests
+		RPDisplayName: opts.RPDisplayName,
+		RPID:          opts.RPID,
+		RPOrigins:     opts.RPOrigins,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create webauthn instance: %w", err)
+		return ServiceDeps{}, fmt.Errorf("failed to create webauthn instance: %w", err)
 	}
 
-	return &AuthService{
-		store:    store,
-		db:       store.DB(),
-		jwtKey:   jwtKey,
-		jwks:     jwks,
-		wsTokens: cache.New(5*time.Minute, 10*time.Minute),
-		eventPub: eventPub,
-		wAuth:    wAuth,
+	return ServiceDeps{
+		Store:    store,
+		JWTKey:   jwtKey,
+		Jwks:     jwks,
+		WsTokens: cache.New(5*time.Minute, 10*time.Minute),
+		EventPub: eventPub,
+		WebAuthn: wAuth,
 	}, nil
 }
 

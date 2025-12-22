@@ -5,12 +5,40 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/elug3/gochat/pkg/contacts/internal/store/s3"
+	"github.com/elug3/gochat/pkg/contacts/internal/store/sqlite3"
+	"github.com/elug3/gochat/shared/events"
 	"github.com/rs/zerolog/log"
 )
 
 func NewHttpServer(opts *Options) (*http.Server, *ContactsService, error) {
 	addr := net.JoinHostPort(opts.Host, opts.Port)
-	s, err := NewContactsService(opts)
+
+	contactsStore, isNewStore, err := sqlite3.NewContactsStore(opts.SaveDir, opts.NoSave)
+	if err != nil {
+		return nil, nil, err
+	}
+	var pub *events.Publisher
+	if !opts.NoEvent {
+		pub, err = events.NewPublisher(opts.NatsUrl)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	var iconStore *s3.IconStore
+	if !opts.NoIcons {
+		iconStore, err = s3.NewIconStore(opts.S3Endpoint, opts.S3AccessKey, opts.S3SecretKey, opts.S3Region)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	s, err := NewContactsService(ServiceDeps{
+		Store:       contactsStore,
+		Publisher:   pub,
+		IconStore:   iconStore,
+		IconBaseURL: opts.IconBaseURL,
+		IsNewStore:  isNewStore,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
