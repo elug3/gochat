@@ -187,7 +187,7 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password, name
 	if s.eventPub != nil {
 		if err = s.eventPub.Publish(events.UserRegistered{
 			UserId:    u.Id,
-			Username:  name,
+			Username:  username,
 			Timestamp: time.Now().Unix(),
 		}); err != nil {
 			log.Err(err).Msg("failed to publish user registered event")
