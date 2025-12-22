@@ -84,7 +84,7 @@ type SubscribeMsg struct {
 type BroadcastMsg struct {
 	ChatId    int    `json:"chat_id,omitempty"`
 	SenderId  int32  `json:"sender_id,omitempty"`
-	TimeStamp int64  `json:"time_stamp,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 	Content   string `json:"content,omitempty"`
 }
 

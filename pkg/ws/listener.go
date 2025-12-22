@@ -2,9 +2,11 @@ package ws
 
 import (
 	"context"
+	"os"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -14,7 +16,13 @@ type EventListener struct {
 }
 
 func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
-	sub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+	nc, err := nats.Connect(opts.NatsUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
+	sub, err := events.NewSubscriber(nc, &logger, events.APP_STREAM, &nats.ConsumerConfig{
 		Durable:     events.DurableWebsocket,
 		AckPolicy:   nats.AckExplicitPolicy,
 		Description: "websocket service consumer",
@@ -34,24 +42,14 @@ func NewEventListener(hub *Hub, opts *Options) (*EventListener, error) {
 }
 
 func (el *EventListener) Run(ctx context.Context) error {
-	log.Info().Msg("starting websocket event listener")
-	err := el.eventSub.PullSubscribe(ctx, el.handleEvent)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to start websocket event listener")
-		return err
-	}
+	defer el.Close()
+	el.eventSub.HandleFunc(events.SubjectMessageSent, el.handler.OnMessageSent)
 
-	defer el.eventSub.Drain()
-	<-ctx.Done()
-	return nil
+	return el.eventSub.Run(ctx)
 }
 
-func (el *EventListener) handleEvent(event events.Event) error {
-	switch event := event.(type) {
-	case *events.MessageSent:
-		return el.handler.OnMessageSent(event)
-	default:
-		log.Warn().Msgf("unhandled event type: %T", event)
+func (el *EventListener) Close() {
+	if el.eventSub != nil {
+		el.eventSub.Close()
 	}
-	return nil
 }

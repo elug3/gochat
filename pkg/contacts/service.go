@@ -89,7 +89,7 @@ func (s *ContactsService) publishResetEvent() {
 
 	contactsResetOnce.Do(func() {
 		s.publish(events.ContactsReset{
-			TimeStamp: time.Now().Unix(),
+			Timestamp: time.Now().Unix(),
 		}, "cannot publish ContactsReset event after initialization")
 	})
 }
@@ -149,13 +149,13 @@ func (s *ContactsService) CreateUserGroup(ctx context.Context, userId int32, gro
 	s.publish(events.GroupCreated{
 		GroupId:   g.Id,
 		GroupName: g.Name,
-		TimeStamp: g.CreatedAt.Unix(),
+		Timestamp: g.CreatedAt.Unix(),
 	}, "cannot publish GroupCreated event for group '%d'", g.Id)
 
 	s.publish(events.MemberJoined{
 		GroupId:   g.Id,
 		UserId:    userId,
-		TimeStamp: g.CreatedAt.Unix(),
+		Timestamp: g.CreatedAt.Unix(),
 	}, "cannot publish MemberJoined event for user '%d' in group '%d'", userId, g.Id)
 
 	return g, nil
@@ -221,7 +221,7 @@ func (s *ContactsService) DeleteUserGroup(ctx context.Context, groupId int, user
 
 	s.publish(events.GroupDeleted{
 		GroupId:   groupId,
-		TimeStamp: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
 	}, "cannot publish GroupDeleted event for group '%d'", groupId)
 
 	return nil
@@ -262,7 +262,7 @@ func (s *ContactsService) Invite(ctx context.Context, groupId int, inviterId int
 	s.publish(events.MemberJoined{
 		GroupId:   groupId,
 		UserId:    inviteeId,
-		TimeStamp: member.CreatedAt.Unix(),
+		Timestamp: member.CreatedAt.Unix(),
 	}, "cannot publish MemberJoined event for user '%d' in group '%d'", inviteeId, groupId)
 
 	return member, nil
@@ -347,7 +347,7 @@ func (s *ContactsService) DeleteMember(ctx context.Context, groupId int, userId 
 	s.publish(events.MemberLeft{
 		GroupId:   groupId,
 		UserId:    targetId,
-		TimeStamp: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
 	}, "cannot publish MemberLeft event for user '%d' in group '%d'", targetId, groupId)
 
 	return nil
@@ -411,7 +411,7 @@ func (s *ContactsService) CreateProfile(ctx context.Context, userId int32, name 
 
 	s.publish(events.ProfileCreated{
 		UserId:    userId,
-		TimeStamp: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
 	}, "cannot publish ProfileCreated event for user '%d'", userId)
 
 	return profile, nil

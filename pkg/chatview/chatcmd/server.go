@@ -2,19 +2,29 @@ package chatcmd
 
 import (
 	"context"
+	"os"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 type ChatProjectionServer struct {
-	subc    *events.Subscriber
+	sub     *events.Subscriber
 	handler *ChatCommandHandler
 }
 
 func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
-	subc, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	nc, err := nats.Connect(opts.NatsUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	sub, err := events.NewSubscriber(nc, &logger, events.APP_STREAM, &nats.ConsumerConfig{
 		Durable:     events.DurableChatView,
 		AckPolicy:   nats.AckExplicitPolicy,
 		Description: "chatview service consumer",
@@ -31,42 +41,22 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	registerHandlers(sub, handler)
 	return &ChatProjectionServer{
-		subc:    subc,
+		sub:     sub,
 		handler: handler,
 	}, nil
 }
 
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
-	log.Info().Msg("server started ...")
-
+	return s.sub.Run(ctx)
 }
 
-func (s *ChatProjectionServer) handleEvent(ctx context.Context, event events.Event) error {
-	var err error
-	switch ev := event.(type) {
-	case *events.GroupCreated:
-		err = s.handler.OnGroupCreated(ctx, ev)
-	case *events.GroupDeleted:
-		err = s.handler.OnGroupDeleted(ctx, ev)
-	case *events.MemberJoined:
-		err = s.handler.OnMemberJoined(ctx, ev)
-	case *events.MemberLeft:
-		err = s.handler.OnMemberLeft(ctx, ev)
-	case *events.MessageSent:
-		err = s.handler.OnMessageSent(ctx, ev)
-	case *events.MessageRead:
-		err = s.handler.OnMessageRead(ctx, ev)
-	case *events.ContactsReset:
-		err = s.handler.OnContactsReset(ctx, ev)
-	default:
-		log.Warn().Msgf("unhandled event type: %T", ev)
-		return nil
-	}
-	if err != nil {
-		log.Error().Err(err).Msg("failed to handle event")
-		return err
-	}
-	log.Info().Msgf("handled event: %T", event)
-	return nil
+func registerHandlers(sub *events.Subscriber, h *ChatCommandHandler) {
+	sub.HandleFunc(events.SubjectContactsReset, h.OnContactsReset)
+	sub.HandleFunc(events.SubjectGroupCreated, h.OnGroupCreated)
+	sub.HandleFunc(events.SubjectGroupDeleted, h.OnGroupDeleted)
+	sub.HandleFunc(events.SubjectMemberJoined, h.OnMemberJoined)
+	sub.HandleFunc(events.SubjectMemberLeft, h.OnMemberLeft)
+	sub.HandleFunc(events.SubjectMessageSent, h.OnMessageSent)
 }

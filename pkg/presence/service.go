@@ -1,16 +1,16 @@
 package presence
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/elug3/gochat/pkg/presence/internal/errs"
 	"github.com/elug3/gochat/pkg/presence/internal/model"
-	"github.com/elug3/gochat/pkg/presence/internal/store"
 	"github.com/elug3/gochat/pkg/presence/internal/store/redisstore"
 )
 
 type PresenceService struct {
-	store store.PresenceStore
+	store *redisstore.PresenceStore
 }
 
 func NewPresenceService(opts *HttpOptions) (*PresenceService, error) {
@@ -23,8 +23,8 @@ func NewPresenceService(opts *HttpOptions) (*PresenceService, error) {
 	}, nil
 }
 
-func (s *PresenceService) GetPresence(userId int32) (*model.Presence, error) {
-	p, err := s.store.GetUserPresence(userId)
+func (s *PresenceService) GetPresence(ctx context.Context, userId int32) (*model.Presence, error) {
+	p, err := s.store.GetUserPresence(ctx, userId)
 	if err != nil {
 		if err == errs.ErrNotFound {
 			p = newEmptyPresence(userId)
@@ -35,8 +35,8 @@ func (s *PresenceService) GetPresence(userId int32) (*model.Presence, error) {
 	return p, nil
 }
 
-func (s *PresenceService) SetPresence(userId int32, state string) error {
-	err := s.store.SetUserPresence(userId, state)
+func (s *PresenceService) SetPresence(ctx context.Context, userId int32, state string) error {
+	err := s.store.SetUserPresence(ctx, userId, state)
 	if err != nil {
 		return fmt.Errorf("failed to set presence: %w", err)
 	}

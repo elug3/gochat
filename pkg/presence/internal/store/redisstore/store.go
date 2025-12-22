@@ -1,13 +1,14 @@
 package redisstore
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/elug3/gochat/pkg/presence/internal/errs"
 	"github.com/elug3/gochat/pkg/presence/internal/model"
-	"github.com/go-redis/redis"
+	"github.com/redis/go-redis/v9"
 )
 
 type PresenceStore struct {
@@ -19,7 +20,7 @@ func NewPresenceStore(redisAddr string) (*PresenceStore, error) {
 		Addr: redisAddr,
 	})
 
-	_, err := client.Ping().Result()
+	_, err := client.Ping(context.Background()).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,7 @@ func NewPresenceStore(redisAddr string) (*PresenceStore, error) {
 	}, nil
 }
 
-func (store *PresenceStore) SetUserPresence(userId int32, state string) error {
+func (store *PresenceStore) SetUserPresence(ctx context.Context, userId int32, state string) error {
 	presence := model.Presence{
 		UserId:   userId,
 		State:    state,
@@ -41,11 +42,11 @@ func (store *PresenceStore) SetUserPresence(userId int32, state string) error {
 		return err
 	}
 
-	return store.rdb.Set(formatPresenceKey(userId), payload, 0).Err()
+	return store.rdb.Set(ctx, formatPresenceKey(userId), payload, 0).Err()
 }
 
-func (store *PresenceStore) GetUserPresence(userId int32) (*model.Presence, error) {
-	result, err := store.rdb.Get(formatPresenceKey(userId)).Result()
+func (store *PresenceStore) GetUserPresence(ctx context.Context, userId int32) (*model.Presence, error) {
+	result, err := store.rdb.Get(ctx, formatPresenceKey(userId)).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, errs.ErrNotFound

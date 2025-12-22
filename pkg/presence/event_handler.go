@@ -1,16 +1,17 @@
 package presence
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/elug3/gochat/pkg/presence/internal/model"
-	"github.com/elug3/gochat/pkg/presence/internal/store"
 	"github.com/elug3/gochat/pkg/presence/internal/store/redisstore"
 	"github.com/elug3/gochat/shared/events"
 )
 
 type EventHandler struct {
-	store store.PresenceStore
+	store *redisstore.PresenceStore
 }
 
 func NewEventHandler(opts *EventOptions) (*EventHandler, error) {
@@ -21,12 +22,13 @@ func NewEventHandler(opts *EventOptions) (*EventHandler, error) {
 	return &EventHandler{store: store}, nil
 }
 
-func (h *EventHandler) OnConnected(ev *events.WebsocketConnected) error {
-	if ev == nil {
-		return fmt.Errorf("event is nil")
+func (h *EventHandler) OnConnected(ctx context.Context, subject string, data []byte) error {
+	var event events.WebsocketConnected
+	if err := json.Unmarshal(data, &event); err != nil {
+		return fmt.Errorf("unmarshal event data: %w", err)
 	}
-	if ev.IsFirst {
-		err := h.store.SetUserPresence(ev.UserId, model.StateOnline)
+	if event.IsFirst {
+		err := h.store.SetUserPresence(ctx, event.UserId, model.StateOnline)
 		if err != nil {
 			return err
 		}
@@ -34,12 +36,13 @@ func (h *EventHandler) OnConnected(ev *events.WebsocketConnected) error {
 	return nil
 }
 
-func (h *EventHandler) OnDisconnected(ev *events.WebsocketDisconnected) error {
-	if ev == nil {
-		return fmt.Errorf("event is nil")
+func (h *EventHandler) OnDisconnected(ctx context.Context, subject string, data []byte) error {
+	var event events.WebsocketDisconnected
+	if err := json.Unmarshal(data, &event); err != nil {
+		return fmt.Errorf("unmarshal event data: %w", err)
 	}
-	if ev.IsLast {
-		err := h.store.SetUserPresence(ev.UserId, model.StateOffline)
+	if event.IsLast {
+		err := h.store.SetUserPresence(ctx, event.UserId, model.StateOffline)
 		if err != nil {
 			return err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -12,11 +13,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 type Server struct {
 	eventSub *events.Subscriber
+	logger   *zerolog.Logger
 	handler  *Handler
 }
 
@@ -34,7 +37,14 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, fmt.Errorf("invalid s3 endpoint %q: %w", opts.S3Endpoint, err)
 	}
 
-	sub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	nc, err := nats.Connect(opts.NatsUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to nats at %q: %w", opts.NatsUrl, err)
+	}
+
+	sub, err := events.NewSubscriber(nc, &logger, events.APP_STREAM, &nats.ConsumerConfig{
 		Durable:     events.DurableAvatar,
 		AckPolicy:   nats.AckExplicitPolicy,
 		Description: "avatar service consumer",
@@ -60,7 +70,7 @@ func NewServer(opts *Options) (*Server, error) {
 	)
 	if err != nil {
 		sub.Close()
-		return nil, fmt.Errorf("failed to init s3 config: %w", err)
+		return nil, fmt.Errorf("failed to create aws config: %w", err)
 	}
 
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
@@ -88,28 +98,9 @@ func NewServer(opts *Options) (*Server, error) {
 }
 
 func (srv *Server) Run(ctx context.Context) error {
-	log.Info().Msg("starting avatar server event processing")
-
-	return srv.eventSub.PullSubscribe(ctx, srv.HandleEvents)
-}
-
-func (srv *Server) HandleEvents(event events.Event) error {
-	var err error
-	var handled bool
-	switch ev := event.(type) {
-	case *events.ProfileCreated:
-		handled = true
-		err = srv.handler.HandleProfileCreated(ev)
-	default:
-		handled = false
-	}
+	err := srv.eventSub.Run(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to handle event %T: %w", event, err)
+		return fmt.Errorf("failed to run event subscriber: %w", err)
 	}
-	if handled {
-		log.Info().Str("event", event.Subject()).Msg("handled event")
-	} else {
-		log.Warn().Str("event", event.Subject()).Msg("unhandled event")
-	}
-	return nil
+	return err
 }

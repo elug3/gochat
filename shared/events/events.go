@@ -1,10 +1,5 @@
 package events
 
-import (
-	"encoding/json"
-	"fmt"
-)
-
 type Event interface {
 	Subject() string
 }
@@ -13,7 +8,7 @@ const (
 	// SubjectUserRegistered is the subject for UserRegistered events.
 	SubjectUserRegistered = "auth.registered"
 
-	SubjectProfileCreated = "avatar.profile.created"
+	SubjectProfileCreated = "contacts.profile.created"
 	SubjectGroupCreated   = "contacts.group.created"
 	SubjectGroupDeleted   = "contacts.group.deleted"
 	SubjectMemberJoined   = "contacts.member.joined"
@@ -61,65 +56,65 @@ type UserRegistered struct {
 
 type ProfileCreated struct {
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 }
 
 type GroupCreated struct {
 	GroupId   int
 	GroupName string
-	TimeStamp int64
+	Timestamp int64
 }
 
 type GroupDeleted struct {
 	GroupId   int
-	TimeStamp int64
+	Timestamp int64
 }
 
 type MemberJoined struct {
 	GroupId   int
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 }
 
 type MemberLeft struct {
 	GroupId   int
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 }
 
 type ContactsReset struct {
-	TimeStamp int64
+	Timestamp int64
 }
 
 type MessageSent struct {
 	ChatId    int
 	SenderId  int32
 	Content   string
-	TimeStamp int64
+	Timestamp int64
 }
 
 type MessageRead struct {
 	ChatId    int
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 }
 
 type WebsocketSent struct {
 	ChatId    int
 	SenderId  int32
 	Content   string
-	TimeStamp int64
+	Timestamp int64
 }
 
 type WebsocketConnected struct {
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 	IsFirst   bool // true if this is the first connection for the user
 }
 
 type WebsocketDisconnected struct {
 	UserId    int32
-	TimeStamp int64
+	Timestamp int64
 	IsLast    bool // true if this is the last connection for the user
 }
 
@@ -169,33 +164,4 @@ func (WebsocketDisconnected) Subject() string {
 
 func (ProfileCreated) Subject() string {
 	return SubjectProfileCreated
-}
-
-type EventFactory func() Event
-
-var subjects = map[string]EventFactory{
-	SubjectUserRegistered:        func() Event { return &UserRegistered{} },
-	SubjectGroupCreated:          func() Event { return &GroupCreated{} },
-	SubjectGroupDeleted:          func() Event { return &GroupDeleted{} },
-	SubjectMemberJoined:          func() Event { return &MemberJoined{} },
-	SubjectMemberLeft:            func() Event { return &MemberLeft{} },
-	SubjectContactsReset:         func() Event { return &ContactsReset{} },
-	SubjectMessageSent:           func() Event { return &MessageSent{} },
-	SubjectWebsocketSent:         func() Event { return &WebsocketSent{} },
-	SubjectMessageRead:           func() Event { return &MessageRead{} },
-	SubjectWebsocketConnected:    func() Event { return &WebsocketConnected{} },
-	SubjectWebsocketDisconnected: func() Event { return &WebsocketDisconnected{} },
-	SubjectProfileCreated:        func() Event { return &ProfileCreated{} },
-}
-
-func UnmarshalEvent(subject string, data []byte) (Event, error) {
-	factory, ok := subjects[subject]
-	if !ok {
-		return nil, fmt.Errorf("unknown subject: %s", subject)
-	}
-	event := factory()
-	if err := json.Unmarshal(data, event); err != nil {
-		return nil, err
-	}
-	return event, nil
 }

@@ -2,12 +2,14 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 func NewHttpServer(opts *Options) (*http.Server, error) {
@@ -30,7 +32,12 @@ type EventServer struct {
 }
 
 func NewEventServer(opts *Options) (*EventServer, error) {
-	eventSub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+	nc, err := nats.Connect(opts.NatsUrl)
+	if err != nil {
+		return nil, err
+	}
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
+	eventSub, err := events.NewSubscriber(nc, &logger, events.APP_STREAM, &nats.ConsumerConfig{
 		Durable:     events.DurableMessage,
 		AckPolicy:   nats.AckExplicitPolicy,
 		Description: "message service consumer",
@@ -53,30 +60,54 @@ func NewEventServer(opts *Options) (*EventServer, error) {
 	}, nil
 }
 
+func (srv *EventServer) Close() {
+	if srv.EventSub != nil {
+		srv.EventSub.Close()
+	}
+}
+
 func (srv *EventServer) Run(ctx context.Context) error {
-	// TODO: handle all type of messages (http, websocket)
-	err := srv.EventSub.PullSubscribe(ctx, func(event events.Event) error {
-		switch ev := event.(type) {
-		case *events.WebsocketSent:
-			_, err := srv.Messages.Send(ctx, ev.SenderId, ev.ChatId, ev.Content)
-			if err != nil {
-				return err
-			}
-			log.Info().Msgf("Relayed websocket message from user %d to chat %d", ev.SenderId, ev.ChatId)
+	defer srv.Close()
+
+	srv.EventSub.HandleFunc(events.SubjectWebsocketSent, func(ctx context.Context, subject string, data []byte) error {
+		var event events.WebsocketSent
+		if err := json.Unmarshal(data, &event); err != nil {
+			return err
+		}
+		_, err := srv.Messages.Send(ctx, event.SenderId, event.ChatId, event.Content)
+		if err != nil {
+			return err
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err := srv.EventSub.Drain(); err != nil {
-			log.Warn().Err(err).Msg("failed to drain event subscriber")
-		}
-		srv.EventSub.Close()
-	}()
-
-	<-ctx.Done()
-	return nil
+	return srv.EventSub.Run(ctx)
 }
+
+// func (srv *EventServer) Run(ctx context.Context) error {
+// 	// TODO: handle all type of messages (http, websocket)
+// 	err := srv.EventSub.PullSubscribe(ctx, func(event events.Event) error {
+// 		switch ev := event.(type) {
+// 		case *events.WebsocketSent:
+// 			_, err := srv.Messages.Send(ctx, ev.SenderId, ev.ChatId, ev.Content)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			log.Info().Msgf("Relayed websocket message from user %d to chat %d", ev.SenderId, ev.ChatId)
+// 		}
+// 		return nil
+// 	})
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	defer func() {
+// 		if err := srv.EventSub.Drain(); err != nil {
+// 			log.Warn().Err(err).Msg("failed to drain event subscriber")
+// 		}
+// 		srv.EventSub.Close()
+// 	}()
+
+// 	<-ctx.Done()
+// 	return nil
+// }
+//

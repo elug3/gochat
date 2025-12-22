@@ -2,6 +2,7 @@ package contacts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/elug3/gochat/pkg/contacts/internal/errs"
@@ -18,8 +19,12 @@ func NewEventHandler(contacts *ContactsService) *EventHandler {
 	}
 }
 
-func (h *EventHandler) OnUserRegistered(ctx context.Context, ev *events.UserRegistered) error {
-	_, err := h.Contacts.CreateProfile(ctx, ev.UserId, ev.Username)
+func (h *EventHandler) OnUserRegistered(ctx context.Context, subject string, data []byte) error {
+	var event events.UserRegistered
+	if err := json.Unmarshal(data, &event); err != nil {
+		return err
+	}
+	_, err := h.Contacts.CreateProfile(ctx, event.UserId, event.Username)
 	if err != nil {
 		if errors.Is(err, errs.ErrExists) {
 			// CreateProfile is idempotent

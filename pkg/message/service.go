@@ -66,7 +66,7 @@ func (s *MessageService) Send(ctx context.Context, userId int32, chatId int, con
 		ChatId:    chatId,
 		SenderId:  userId,
 		Content:   content,
-		TimeStamp: msg.SentAt.Unix(),
+		Timestamp: msg.SentAt.Unix(),
 	})
 	return msg, nil
 }
@@ -114,7 +114,7 @@ func (s *MessageService) ListUserChatMessages(ctx context.Context, chatId int, u
 	s.pub.Publish(events.MessageRead{
 		ChatId:    chatId,
 		UserId:    userId,
-		TimeStamp: 0, // TODO: set timestamp
+		Timestamp: 0, // TODO: set timestamp
 	})
 
 	return messages, nil

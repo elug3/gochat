@@ -40,7 +40,7 @@ func (h *Handler) registerRoutes() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		presence, err := h.Presences.GetPresence(userId)
+		presence, err := h.Presences.GetPresence(c.Request.Context(), userId)
 		if err != nil {
 			c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

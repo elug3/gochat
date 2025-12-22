@@ -2,10 +2,11 @@ package presence
 
 import (
 	"context"
+	"os"
 
 	"github.com/elug3/gochat/shared/events"
 	"github.com/nats-io/nats.go"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type EventListener struct {
@@ -18,7 +19,12 @@ func NewEventListener(opts *EventOptions) (*EventListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	eventSub, err := events.NewSubscriber(opts.NatsUrl, events.APP_STREAM, &nats.ConsumerConfig{
+	nc, err := nats.Connect(opts.NatsUrl)
+	if err != nil {
+		return nil, err
+	}
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
+	eventSub, err := events.NewSubscriber(nc, &logger, events.APP_STREAM, &nats.ConsumerConfig{
 		Durable:     events.DurablePresence,
 		AckPolicy:   nats.AckExplicitPolicy,
 		Description: "presence service consumer",
@@ -39,39 +45,14 @@ func NewEventListener(opts *EventOptions) (*EventListener, error) {
 }
 
 func (el *EventListener) Listen(ctx context.Context) error {
-	err := el.eventSub.PullSubscribe(ctx, func(event events.Event) error {
-		switch ev := event.(type) {
-		case *events.WebsocketConnected:
-			if err := el.handler.OnConnected(ev); err != nil {
-				log.Error().Err(err).Msgf("error handling event: %T", event)
-				return err
-			}
-		case *events.WebsocketDisconnected:
-			if err := el.handler.OnDisconnected(ev); err != nil {
-				log.Error().Err(err).Msgf("error handling event: %T", event)
-				return err
-			}
+	el.eventSub.HandleFunc(events.SubjectWebsocketConnected, el.handler.OnConnected)
+	el.eventSub.HandleFunc(events.SubjectWebsocketDisconnected, el.handler.OnDisconnected)
 
-		default:
-			log.Warn().Msgf("unhandled event type: %T", event)
-			return nil
-		}
+	return el.eventSub.Run(ctx)
+}
 
-		log.Info().Msgf("handled event: %T", event)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	log.Info().Msg("listening for events...")
-
-	defer func() {
-		if err := el.eventSub.Drain(); err != nil {
-			log.Warn().Err(err).Msg("failed to drain event subscriber")
-		}
+func (el *EventListener) Close() {
+	if el.eventSub != nil {
 		el.eventSub.Close()
-	}()
-
-	<-ctx.Done()
-	return nil
+	}
 }
