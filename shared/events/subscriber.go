@@ -110,8 +110,8 @@ func NewSubscriber(nc *nats.Conn, logger *zerolog.Logger, stream string, cfg *na
 				Msgf("consumer %s already exists; continuing", cfg.Durable)
 		}
 	}
-	sub, err := js.PullSubscribe(
-		"", // subject ignored when binding to a durble consumer
+        sub, err := js.PullSubscribe(
+                "", // subject ignored when binding to a durable consumer
 		cfg.Durable,
 		nats.Bind(stream, cfg.Durable),
 	)
