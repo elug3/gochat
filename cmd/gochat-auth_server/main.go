@@ -14,8 +14,8 @@ var usageStr = `
 Usage: gochat-auth [option]...
 
 Server Options:
-	-H <host>			Bind to host address (default: 0.0.0.0)
-	-p <port>			Port to run the server on (default: 8080)
+	-H, --host <host>		Bind to host address (default: 0.0.0.0)
+	-p, --port <port>		Port to run the server on (default: 8080)
 
 Command Options:
 	-h			 		Show this help message

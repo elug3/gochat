@@ -46,6 +46,7 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	var opts Options
 
 	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Host address (default: 0.0.0.0)")
+	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Host address (default: 0.0.0.0)")
 	fs.StringVar(&opts.Port, "p", "8080", "Port number (default: 8080)")
 	fs.StringVar(&opts.Port, "port", "8080", "Port number (default: 8080)")
 

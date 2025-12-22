@@ -21,7 +21,9 @@ func ConfigureHttpOptions(fs *flag.FlagSet, args []string) (*HttpOptions, error)
 	var opts HttpOptions
 
 	fs.StringVar(&opts.Host, "host", "0.0.0.0", "HTTP server host")
+	fs.StringVar(&opts.Host, "H", "0.0.0.0", "HTTP server host")
 	fs.StringVar(&opts.Port, "port", "8080", "HTTP server port")
+	fs.StringVar(&opts.Port, "p", "8080", "HTTP server port")
 	fs.StringVar(&opts.RedisAddr, "redis-url", "", "redis address for presence store")
 
 	err := fs.Parse(args)

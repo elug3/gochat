@@ -17,7 +17,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	var opts Options
 
 	fs.StringVar(&opts.Port, "p", "8080", "Server port (default: 8080)")
-	fs.StringVar(&opts.Host, "h", "0.0.0.0", "Server host (default: '0.0.0.0')")
+	fs.StringVar(&opts.Port, "port", "8080", "Server port (default: 8080)")
+	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Server host (default: '0.0.0.0')")
+	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Server host (default: '0.0.0.0')")
 	fs.Func("c", "CORS Allowed Origins (comma separated)", func(s string) error {
 		if s == "" {
 			return nil

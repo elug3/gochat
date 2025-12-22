@@ -40,7 +40,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	fs.BoolVar(&showVersion, "v", false, "Show version")
 
 	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Server host")
+	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Server host")
 	fs.StringVar(&opts.Port, "p", "8080", "Server port")
+	fs.StringVar(&opts.Port, "port", "8080", "Server port")
 
 	fs.StringVar(&opts.KeyPath, "secret", "", "Path to RSA private key in PEM format")
 	fs.BoolVar(&opts.UseTmpKey, "tmpkey", false, "Use temporary key")
