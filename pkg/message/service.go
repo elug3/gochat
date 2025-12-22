@@ -147,6 +147,6 @@ func (s *MessageService) sendToGroup(ctx context.Context, userId int32, chatId i
 
 // TODO: Implement sending to user
 func (s *MessageService) sendToUser(ctx context.Context, chatId int, userId int32, content string) (*model.Message, error) {
-	return nil, nil
+	return nil, fmt.Errorf("direct messaging is not implemented for chatId %d", chatId)
 
 }
