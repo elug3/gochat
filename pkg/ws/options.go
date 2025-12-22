@@ -22,7 +22,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	var opts Options
 
 	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Host to bind the WebSocket server to")
+	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Host to bind the WebSocket server to")
 	fs.StringVar(&opts.Port, "port", "12345", "Port to bind the WebSocket server to")
+	fs.StringVar(&opts.Port, "p", "12345", "Port to bind the WebSocket server to")
 
 	fs.StringVar(&opts.AuthServerUrl, "auth-server", "", "Authentication server url")
 	fs.StringVar(&opts.ContactsServerUrl, "contacts-server", "", "User info server url")
@@ -50,7 +52,7 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 		if envVar := os.Getenv(("NATS_URL")); envVar != "" {
 			opts.NatsUrl = envVar
 		} else {
-			return nil, fmt.Errorf("Please set $NATS_URL environment variable")
+			opts.NatsUrl = "nats://localhost:4222"
 		}
 	}
 

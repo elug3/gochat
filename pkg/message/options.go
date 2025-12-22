@@ -19,7 +19,9 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	var opts Options
 
 	fs.StringVar(&opts.Port, "port", "8080", "Port to run the server on")
+	fs.StringVar(&opts.Port, "p", "8080", "Port to run the server on")
 	fs.StringVar(&opts.Host, "host", "0.0.0.0", "Host to run the server on")
+	fs.StringVar(&opts.Host, "H", "0.0.0.0", "Host to run the server on")
 	fs.StringVar(&opts.SaveDir, "save-dir", "./", "Directory to save data")
 	fs.BoolVar(&opts.NoSave, "no-save", false, "Run in no-save mode (data will not be persisted)")
 	fs.StringVar(&opts.NatsUrl, "nats-url", "", "URL for the NATS server (default: nats://localhost:4222)")
