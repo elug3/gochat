@@ -49,6 +49,8 @@ func NewChatProjectionServer(opts *Options) (*ChatProjectionServer, error) {
 }
 
 func (s *ChatProjectionServer) Run(ctx context.Context) error {
+	defer s.Close()
+
 	return s.sub.Run(ctx)
 }
 
@@ -59,4 +61,11 @@ func registerHandlers(sub *events.Subscriber, h *ChatCommandHandler) {
 	sub.HandleFunc(events.SubjectMemberJoined, h.OnMemberJoined)
 	sub.HandleFunc(events.SubjectMemberLeft, h.OnMemberLeft)
 	sub.HandleFunc(events.SubjectMessageSent, h.OnMessageSent)
+	sub.HandleFunc(events.SubjectMessageRead, h.OnMessageRead)
+}
+
+func (s *ChatProjectionServer) Close() {
+	if s.sub != nil {
+		s.sub.Close()
+	}
 }

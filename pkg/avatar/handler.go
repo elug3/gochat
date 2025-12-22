@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"image/png"
 
@@ -32,12 +33,16 @@ func NewHandler(s3Client *s3.Client, bucket string) (*Handler, error) {
 	}, nil
 }
 
-func (h *Handler) HandleProfileCreated(ev *events.ProfileCreated) error {
+func (h *Handler) HandleProfileCreated(ctx context.Context, subject string, data []byte) error {
+	var event events.ProfileCreated
+	if err := json.Unmarshal(data, &event); err != nil {
+		return fmt.Errorf("unmarshal event data: %w", err)
+	}
 	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, uint64(ev.UserId))
+	binary.LittleEndian.PutUint64(b, uint64(event.UserId))
 
 	img := identicon.New(b, 256)
-	key := fmt.Sprintf("%d.png", ev.UserId)
+	key := fmt.Sprintf("%d.png", event.UserId)
 
 	buf := new(bytes.Buffer)
 	if err := png.Encode(buf, img); err != nil {

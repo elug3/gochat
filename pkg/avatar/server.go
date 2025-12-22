@@ -20,6 +20,7 @@ import (
 type Server struct {
 	eventSub *events.Subscriber
 	logger   *zerolog.Logger
+	nc       *nats.Conn
 	handler  *Handler
 }
 
@@ -93,14 +94,26 @@ func NewServer(opts *Options) (*Server, error) {
 	srv := &Server{
 		eventSub: sub,
 		handler:  handler,
+		nc:       nc,
 	}
 	return srv, nil
 }
 
 func (srv *Server) Run(ctx context.Context) error {
+	defer srv.Close()
+	srv.eventSub.HandleFunc(events.SubjectProfileCreated, srv.handler.HandleProfileCreated)
 	err := srv.eventSub.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to run event subscriber: %w", err)
 	}
 	return err
+}
+
+func (srv *Server) Close() {
+	if srv.eventSub != nil {
+		srv.eventSub.Close()
+	}
+	if srv.nc != nil && !srv.nc.IsClosed() {
+		srv.nc.Close()
+	}
 }

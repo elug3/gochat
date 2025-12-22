@@ -131,7 +131,7 @@ func (h *Hub) Run(ctx context.Context) error {
 			log.Info().Msgf("user %d registered with client %d", msg.UserId, clientId)
 			h.eventPub.Publish(&events.WebsocketConnected{
 				UserId:    msg.UserId,
-				TimeStamp: time.Now().Unix(),
+				Timestamp: time.Now().Unix(),
 				IsFirst:   isFirst,
 			})
 
@@ -162,7 +162,7 @@ func (h *Hub) Run(ctx context.Context) error {
 				}
 				h.eventPub.Publish(&events.WebsocketDisconnected{
 					UserId:    msg.UserId,
-					TimeStamp: time.Now().Unix(),
+					Timestamp: time.Now().Unix(),
 					IsLast:    isLast,
 				})
 			}
@@ -220,7 +220,7 @@ func (h *Hub) Run(ctx context.Context) error {
 						ChatId:    msg.ChatId,
 						SenderId:  msg.SenderId,
 						Content:   msg.Content,
-						TimeStamp: time.Now().Unix(),
+						Timestamp: time.Now().Unix(),
 					}); err != nil {
 						log.Error().Err(err).Msgf("failed to publish event: %v", err)
 					}
