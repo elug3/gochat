@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-webauthn/webauthn/protocol"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type AuthHandler struct {
@@ -23,6 +23,7 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.POST("/register", h.HandleRegister)
 
 	r.GET("/.well-known/jwks.json", h.HandleJwks)
+	r.GET("/token/exchange", h.HandleTokenExchange)
 
 	r.GET("/ws", h.HandleUseWsToken)
 	r.POST("/ws", h.HandleCreateWsToken)
@@ -38,11 +39,11 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.DELETE("/webauthn/passkeys/:id", h.HandleDeleteWebAuthnPasskey)
 }
 
-func Logger() gin.HandlerFunc {
+func Logger(logger *zerolog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
 
-		log.Info().
+		logger.Info().
 			Str("method", c.Request.Method).
 			Str("path", c.Request.URL.Path).
 			Int("status", c.Writer.Status()).
@@ -54,7 +55,7 @@ func Logger() gin.HandlerFunc {
 
 func newAuthHandler(authService *AuthService) *AuthHandler {
 	router := gin.New()
-	router.Use(Logger())
+	router.Use(Logger(authService.logger))
 	h := AuthHandler{
 		router: router,
 		auth:   authService,
@@ -83,12 +84,17 @@ func (h *AuthHandler) HandleAuthInfo(c *gin.Context) {
 }
 
 func (h *AuthHandler) HandleLogin(c *gin.Context) {
-	username, password, ok := c.Request.BasicAuth()
-	if !ok || username == "" || password == "" {
-		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid authorization header"})
+	var req struct {
+		Username string `json:"username" bind:"required"`
+		Password string `json:"password" bind:"required"`
+		Client   Client `json:"client,omitempty"`
+	}
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	token, err := h.auth.Login(c.Request.Context(), username, password)
+	token, err := h.auth.Login(c.Request.Context(), req.Username, req.Password, &req.Client)
 	if err != nil {
 		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -99,7 +105,7 @@ func (h *AuthHandler) HandleLogin(c *gin.Context) {
 func (h *AuthHandler) HandleRegister(c *gin.Context) {
 	var req struct {
 		Username string `json:"username" bind:"required"`
-		Name     string `json:"name"`
+		Name     string `json:"name" bind:"required"`
 		Password string `json:"password" bind:"required"`
 	}
 	err := c.BindJSON(&req)
@@ -128,6 +134,16 @@ func (h *AuthHandler) HandleJwks(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Status(http.StatusOK)
 	c.Writer.Write(jwksData)
+}
+
+func (h *AuthHandler) HandleTokenExchange(c *gin.Context) {
+	var req struct {
+		SessionId          string   `json:"session_id" binding:"required"`
+		RequestedAudiences []string `json:"request_audiences" binding:"required"`
+		RequestedScopes    []string `json:"request_scopes" binding:"required"`
+		RequestedTTL       int64    `json:"request_ttl"`
+	}
+	h.auth.Exchange(c.Request.Context(), req.SessionId, req.RequestedAudiences, req.RequestedScopes, req.RequestedTTL)
 }
 
 func (h *AuthHandler) HandleCreateWsToken(c *gin.Context) {
@@ -221,7 +237,7 @@ func (h *AuthHandler) HandleWebAuthnLoginFinish(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	token, err := h.auth.WebAuthnLoginFinish(c.Request.Context(), pca)
+	token, err := h.auth.WebAuthnLoginFinish(c.Request.Context(), pca, nil)
 	if err != nil {
 		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

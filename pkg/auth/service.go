@@ -4,32 +4,35 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
+	"crypto/sha512"
 	"database/sql"
-	"encoding/pem"
+	"encoding/base32"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
+	"net"
 	"strconv"
 	"time"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
+	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/patrickmn/go-cache"
 
 	"github.com/elug3/gochat/pkg/auth/internal/model"
-	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 type AuthService struct {
-	store *sqlite3.AuthStore
-	db    *sql.DB
+	logger *zerolog.Logger
+	store  *sqlite3.AuthStore
+	db     *sql.DB
 
 	jwtKey   *rsa.PrivateKey
 	jwks     *jwk.Jwks
@@ -41,6 +44,7 @@ type AuthService struct {
 }
 
 type ServiceDeps struct {
+	Logger   *zerolog.Logger
 	Store    *sqlite3.AuthStore
 	JWTKey   *rsa.PrivateKey
 	Jwks     *jwk.Jwks
@@ -49,101 +53,40 @@ type ServiceDeps struct {
 	EventPub *events.Publisher
 }
 
-func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
-	keyData, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	der, _ := pem.Decode(keyData)
-	key, err := x509.ParsePKCS8PrivateKey(der.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	rsaKey, ok := key.(*rsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("not an RSA private key")
-	}
-
-	return rsaKey, nil
+type Client struct {
+	IP        net.IP
+	UserAgent string
 }
+
+var (
+	AccessTokenExpiry  = 8 * time.Hour      // 8 hours
+	RefreshTokenExpiry = 7 * 24 * time.Hour // 7 days
+)
 
 func NewAuthService(deps ServiceDeps) (*AuthService, error) {
 	if deps.Store == nil {
-		return nil, fmt.Errorf("auth store is required")
+		return nil, fmt.Errorf("%w: auth store is required", ErrInvalidConfig)
 	}
 	if deps.JWTKey == nil {
-		return nil, fmt.Errorf("jwt key is required")
+		return nil, fmt.Errorf("%w: jwt key is required", ErrInvalidConfig)
 	}
 	if deps.Jwks == nil {
-		return nil, fmt.Errorf("jwks is required")
+		return nil, fmt.Errorf("%w: jwks is required", ErrInvalidConfig)
 	}
 	if deps.WsTokens == nil {
-		return nil, fmt.Errorf("ws token cache is required")
+		return nil, fmt.Errorf("%w: ws token cache is required", ErrInvalidConfig)
 	}
 	if deps.WebAuthn == nil {
-		return nil, fmt.Errorf("webauthn is required")
+		return nil, fmt.Errorf("%w: webauthn is required", ErrInvalidConfig)
 	}
 	return &AuthService{
+		logger:   deps.Logger,
 		store:    deps.Store,
-		db:       deps.Store.DB(),
 		jwtKey:   deps.JWTKey,
 		jwks:     deps.Jwks,
 		wsTokens: deps.WsTokens,
 		eventPub: deps.EventPub,
 		wAuth:    deps.WebAuthn,
-	}, nil
-}
-
-func NewServiceDeps(opts *Options) (ServiceDeps, error) {
-	var (
-		jwtKey   *rsa.PrivateKey
-		eventPub *events.Publisher
-		err      error
-	)
-
-	if opts.UseTmpKey {
-		log.Warn().Msg("using temporary RSA key, not recommended for production")
-		jwtKey, err = rsa.GenerateKey(rand.Reader, 2048)
-	} else {
-		jwtKey, err = loadPrivateKey(opts.KeyPath)
-	}
-	if err != nil {
-		return ServiceDeps{}, fmt.Errorf("failed to load RSA private key: %w", err)
-	}
-
-	if !opts.NoEvents {
-		eventPub, err = events.NewPublisher(opts.NatsUrl)
-		if err != nil {
-			return ServiceDeps{}, fmt.Errorf("failed to connect to NATS server: %w", err)
-		}
-	}
-
-	jwks := jwk.NewJwks()
-	if err = jwks.AddKey(jwtKey.PublicKey, "key1"); err != nil {
-		return ServiceDeps{}, fmt.Errorf("failed to add key to JWKs: %w", err)
-	}
-
-	store, err := sqlite3.NewAuthStore(opts.SaveDir, opts.InMemory)
-	if err != nil {
-		return ServiceDeps{}, err
-	}
-
-	wAuth, err := webauthn.New(&webauthn.Config{
-		RPDisplayName: opts.RPDisplayName,
-		RPID:          opts.RPID,
-		RPOrigins:     opts.RPOrigins,
-	})
-	if err != nil {
-		return ServiceDeps{}, fmt.Errorf("failed to create webauthn instance: %w", err)
-	}
-
-	return ServiceDeps{
-		Store:    store,
-		JWTKey:   jwtKey,
-		Jwks:     jwks,
-		WsTokens: cache.New(5*time.Minute, 10*time.Minute),
-		EventPub: eventPub,
-		WebAuthn: wAuth,
 	}, nil
 }
 
@@ -160,28 +103,28 @@ func credentialsRule(username, password string) error {
 func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (*model.User, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	if err = credentialsRule(username, password); err != nil {
 		return nil, fmt.Errorf("%w: %w", errs.ErrConstraint, err)
 	}
-	passwordHash, err := newHash(password)
+	passwordHash, err := generatePasswordHash(password)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
+		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
 	u, err := s.store.CreateUser(ctx, tx, username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create user: %s: %w", username, err)
+		return nil, fmt.Errorf("create user %q: %w", username, err)
 	}
 
 	if err = s.store.SetPasswordHash(ctx, tx, u.Id, passwordHash); err != nil {
-		return nil, fmt.Errorf("failed to set password: %w", err)
+		return nil, fmt.Errorf("set password hash user %d: %w", u.Id, err)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	if s.eventPub != nil {
@@ -200,20 +143,20 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password, name
 func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	passwordHash, err := newHash(password)
+	passwordHash, err := generatePasswordHash(password)
 	if err != nil {
-		return fmt.Errorf("failed to create hash password: %w", err)
+		return fmt.Errorf("hash password: %w", err)
 	}
 	if err = s.store.SetPasswordHash(ctx, tx, uid, passwordHash); err != nil {
-		return fmt.Errorf("failed to set password: %w", err)
+		return fmt.Errorf("set password hash user %d: %w", uid, err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 
 	// TODO: publish event
@@ -221,48 +164,116 @@ func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password st
 	return nil
 }
 
-func (s *AuthService) Login(ctx context.Context, username, password string) (*model.Token, error) {
+func (s *AuthService) Login(ctx context.Context, username, password string, client *Client) (*model.Session, error) {
+	if client == nil {
+		client = &Client{
+			IP:        net.IPv4zero,
+			UserAgent: "Unknown",
+		}
+	}
+	sessionDuration := 7 * 24 * time.Hour // TODO: make configurable
+	expiresAt := time.Now().Add(sessionDuration)
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	pw, err := s.store.GetPasswordByUsername(ctx, tx, username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get password hash: %w", err)
+		return nil, fmt.Errorf("get password hash %q: %w", username, err)
 	}
 
 	if match := pw.ValidatePassword(password); !match {
 		return nil, errs.ErrAuthenticationFailure
 	}
 
-	// authentication success
-	expiresIn := time.Hour * 24 * 7
-	token, err := newToken(pw.UserId, s.jwtKey, expiresIn) // 7 days
+	sessionId, err := generateSessionId()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
+	sessionHash, err := hashSessionId(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("hash session id: %w", err)
 	}
 
-	// TODO: publish event
+	createdAt := time.Now()
+	if err = s.store.SaveSession(ctx, tx, pw.UserId, sessionHash, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	if s.eventPub != nil {
+		if err = s.eventPub.Publish(events.UserLoggedIn{
+			UserId:    pw.UserId,
+			Username:  username,
+			IP:        client.IP,
+			UserAgent: client.UserAgent,
+			Timestamp: time.Now().Unix(),
+		}); err != nil {
+			log.Err(err).Msg("failed to publish user logged in event")
+		}
+	}
+
+	return &model.Session{
+		SessionId: sessionId,
+		UserId:    pw.UserId,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+		IP:        client.IP,
+		UserAgent: client.UserAgent,
+	}, nil
+}
+
+func (s *AuthService) Exchange(ctx context.Context, sessionId string, requestedAudiences, requestedScopes []string, requestedTTL int64) (*model.Token, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	session, err := s.validateSession(ctx, tx, sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("validate session %q: %w", sessionId, err)
+	}
+
+	token, err := newToken(session.UserId, s.jwtKey, requestedAudiences, requestedTTL)
+	if err != nil {
+		return nil, fmt.Errorf("create token: %w", err)
 	}
 
 	return token, nil
 }
 
+func (s *AuthService) validateSession(ctx context.Context, tx *sql.Tx, sessionId string) (*model.Session, error) {
+	hash, err := hashSessionId(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("hash session id: %w", err)
+	}
+	session, err := s.store.GetSessionByHash(ctx, tx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+	if session.ExpiresAt.Before(time.Now()) {
+		return nil, errs.ErrSessionExpired
+	}
+	return session, nil
+}
+
 func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (*protocol.CredentialCreation, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load webauthn user: %w", err)
+		return nil, fmt.Errorf("load webauthn user %d: %w", userId, err)
 	}
 
 	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationOptional,
@@ -271,15 +282,15 @@ func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (
 		webauthn.WithExtensions(map[string]any{"creProps": true}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin registration: %w", err)
+		return nil, fmt.Errorf("begin registration: %w", err)
 	}
 
-	if err = s.store.SaveSessionData(ctx, tx, session); err != nil {
-		return nil, fmt.Errorf("cannot save session data: %w", err)
+	if err = s.store.SaveWebauthnSessionData(ctx, tx, session); err != nil {
+		return nil, fmt.Errorf("save session data: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return creation, nil
@@ -288,7 +299,7 @@ func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (
 func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, pcc *protocol.ParsedCredentialCreationData) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -296,30 +307,30 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 
 	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
-		return fmt.Errorf("failed to load webauthn user: %w", err)
+		return fmt.Errorf("load webauthn user %d: %w", userId, err)
 	}
 
 	challenge := pcc.Response.CollectedClientData.Challenge
 
-	session, err := s.store.GetSessionData(ctx, tx, challenge)
+	session, err := s.store.GetWebauthnSessionData(ctx, tx, challenge)
 	if err != nil {
-		return fmt.Errorf("failed to get session data: %w", err)
+		return fmt.Errorf("get session data: %w", err)
 	}
 	credential, err := s.wAuth.CreateCredential(u, *session, pcc)
 	if err != nil {
-		return fmt.Errorf("failed to create credential: %w", err)
+		return fmt.Errorf("create credential: %w", err)
 	}
 
 	if err = s.store.SaveWebAuthnCredential(ctx, tx, userId, credentialName, credential); err != nil {
-		return fmt.Errorf("cannot save webauthn credential: %w", err)
+		return fmt.Errorf("save webauthn credential: %w", err)
 	}
 
-	if err = s.store.DeleteSessionData(ctx, tx, challenge); err != nil {
-		return fmt.Errorf("cannot delete session data: %w", err)
+	if err = s.store.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
+		return fmt.Errorf("delete session data: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 	log.Info().Msgf("Registered new passkey for user %d", userId)
 
@@ -329,40 +340,41 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 func (s *AuthService) WebAuthnLoginBegin(ctx context.Context) (*protocol.CredentialAssertion, error) {
 	assertion, session, err := s.wAuth.BeginDiscoverableMediatedLogin(protocol.MediationOptional)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin login: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	if err = s.store.SaveSessionData(ctx, tx, session); err != nil {
-		return nil, fmt.Errorf("cannot save session data: %w", err)
+	if err = s.store.SaveWebauthnSessionData(ctx, tx, session); err != nil {
+		return nil, fmt.Errorf("save session data: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 	return assertion, nil
 }
 
-func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *protocol.ParsedCredentialAssertionData) (*model.Token, error) {
+func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *protocol.ParsedCredentialAssertionData, client *Client) (*model.Session, error) {
+	expiresAt := time.Now().Add(7 * 24 * time.Hour) // TODO: make configurable
 	var (
 		u   *model.WebAuthnUser
 		err error
 	)
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	challenge := parsedResponse.Response.CollectedClientData.Challenge
 
-	session, err := s.store.GetSessionData(ctx, tx, challenge)
+	webauthnSession, err := s.store.GetWebauthnSessionData(ctx, tx, challenge)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session data: %w", err)
+		return nil, fmt.Errorf("get session data: %w", err)
 	}
 
 	credential, err := s.wAuth.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (user webauthn.User, err error) {
@@ -371,44 +383,60 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 			return nil, fmt.Errorf("invalid user handle: %w", err)
 		}
 		if u, err = s.store.GetWebAuthnUser(ctx, tx, uid); err != nil {
-			return nil, fmt.Errorf("failed to load webauthn user: %w", err)
+			return nil, fmt.Errorf("load webauthn user %d: %w", uid, err)
 		}
 		return u, nil
-	}, *session, parsedResponse)
+	}, *webauthnSession, parsedResponse)
 	if err != nil {
-		return nil, fmt.Errorf("failed to validate login: %w", err)
+		return nil, fmt.Errorf("validate login: %w", err)
 	}
 
 	if err = s.store.UpdateWebAuthnCredentialAfterLogin(ctx, tx, u.Id, credential); err != nil {
-		return nil, fmt.Errorf("cannot update webauthn credential: %w", err)
+		return nil, fmt.Errorf("update webauthn credential: %w", err)
 	}
 
-	if err = s.store.DeleteSessionData(ctx, tx, challenge); err != nil {
-		return nil, fmt.Errorf("cannot delete session data: %w", err)
+	if err = s.store.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
+		return nil, fmt.Errorf("delete session data: %w", err)
+	}
+
+	sessionId, err := generateSessionId()
+	if err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
+	sessionHsah, err := hashSessionId(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("hash session id: %w", err)
+	}
+
+	createdAt := time.Now()
+	if err = s.store.SaveSession(ctx, tx, u.Id, sessionHsah, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	// TODO: use configured expiration time
-	token, err := newToken(u.Id, s.jwtKey, time.Hour*24*7) // 7 days
-	if err != nil {
-		return nil, err
-	}
-	return token, nil
+	return &model.Session{
+		SessionId: sessionId,
+		UserId:    u.Id,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+		IP:        client.IP,
+		UserAgent: client.UserAgent,
+	}, nil
 }
 
 func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32) ([]model.Passkey, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	passkeys, err := s.store.GetPasskeysByUserId(ctx, tx, userId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get passkeys: %w", err)
+		return nil, fmt.Errorf("get passkeys: %w", err)
 	}
 
 	return passkeys, nil
@@ -417,20 +445,20 @@ func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32)
 func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkeyId int32, newName string) (*model.Passkey, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	passkey, err := s.store.UpdatePasskey(ctx, tx, passkeyId, newName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update passkey: %w", err)
+		return nil, fmt.Errorf("update passkey %d: %w", passkeyId, err)
 	}
 	if passkey.UserId != userId {
-		return nil, fmt.Errorf("passkey does not belong to user")
+		return nil, fmt.Errorf("passkey %d does not belong to user", passkeyId)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 	log.Info().Msgf("Updated passkey %d for user %d", passkeyId, userId)
 	return passkey, nil
@@ -439,28 +467,23 @@ func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkey
 func (s *AuthService) DeleteWebAuthnPasskey(ctx context.Context, userId, passkeyId int32) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	passkey, err := s.store.DeletePasskeyById(ctx, tx, passkeyId)
 	if err != nil {
-		return fmt.Errorf("failed to delete passkey: %w", err)
+		return fmt.Errorf("delete passkey %d: %w", passkeyId, err)
 	}
 	if passkey.UserId != userId {
-		return fmt.Errorf("passkey does not belong to user")
+		return fmt.Errorf("passkey %d does not belong to user", passkeyId)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 	log.Info().Msgf("Deleted passkey %d for user %d", passkeyId, userId)
 	return nil
-}
-
-// TODO: implement refresh token
-func Refresh(ctx context.Context, refreshToken string) (newAccessToken, newRefreshToken string, err error) {
-	return "", "", nil
 }
 
 // ValidateAccessToken validates the access token and returns the user Id if valid.
@@ -472,7 +495,7 @@ func (s *AuthService) ValidateAccessToken(ctx context.Context, accessToken strin
 		return s.jwtKey.Public(), nil
 	})
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("parse token: %w", err)
 	}
 	if !token.Valid {
 		return 0, errs.ErrAuthenticationFailure
@@ -488,10 +511,6 @@ func (s *AuthService) ValidateAccessToken(ctx context.Context, accessToken strin
 		return 0, fmt.Errorf("sub claim not found")
 	}
 	return 0, fmt.Errorf("invalid token claims")
-}
-
-func (s *AuthService) RevokeAccessToken(ctx context.Context) error {
-	return nil
 }
 
 func (s *AuthService) CreateWsToken(ctx context.Context, accessToken string) (string, error) {
@@ -533,29 +552,31 @@ func (s *AuthService) Close() error {
 	return s.store.Close()
 }
 
-func newToken(userId int32, jwtKey *rsa.PrivateKey, expiresIn time.Duration) (*model.Token, error) {
-	accessToken, err := newClaims(userId, jwtKey, expiresIn)
+func newToken(userId int32, jwtKey *rsa.PrivateKey, audiences []string, TTL int64) (*model.Token, error) {
+	accessToken, err := newClaims(userId, jwtKey, audiences, TTL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create access token: %w", err)
+		return nil, err
 	}
 	return &model.Token{
-		UserId:       userId,
-		AccessToken:  accessToken,
-		RefreshToken: "", // TODO
-		ExpiresIn:    expiresIn,
+		UserId:      userId,
+		AccessToken: accessToken,
 	}, nil
 }
 
-func newClaims(userId int32, jwtKey *rsa.PrivateKey, expiresIn time.Duration) (accessToken string, err error) {
-	issudAt := time.Now()
-	expiresAt := issudAt.Add(expiresIn)
+func newClaims(userId int32, jwtKey *rsa.PrivateKey, audiences []string, TTL int64) (accessToken string, err error) {
+	issudAt := time.Now().Unix()
+	expiresAt := issudAt + TTL
+	userIdStr := strconv.FormatInt(int64(userId), 10)
 
 	claims := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"sub": strconv.Itoa(int(userId)),
-		"iat": jwt.NewNumericDate(issudAt),
-		"exp": jwt.NewNumericDate(expiresAt),
-		"aud": "api",
+		"iss": "auth",
+		"sub": userIdStr,
+		"aud": audiences,
+		"iat": issudAt,
+		"exp": expiresAt,
+		"nbf": issudAt,
 	})
+	// TODO: add iti, client_id, scp field later
 	claims.Header["kid"] = "key1"
 
 	accessToken, err = claims.SignedString(jwtKey)
@@ -563,11 +584,39 @@ func newClaims(userId int32, jwtKey *rsa.PrivateKey, expiresIn time.Duration) (a
 		return "", err
 	}
 
-	log.Info().Msgf("Generated access token for user %d", userId)
-
 	return accessToken, nil
 }
 
-func newHash(password string) (string, error) {
+func generatePasswordHash(password string) (string, error) {
 	return argon2id.CreateHash(password, argon2id.DefaultParams)
+}
+
+func generateTokenString(prefix string) (string, error) {
+	length := 16
+	b := make([]byte, length)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s_%s", prefix, base32.StdEncoding.EncodeToString(b)), nil
+}
+
+func hashSessionId(s string) (string, error) {
+	hasher := sha512.New512_256()
+	_, err := hasher.Write([]byte(s))
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func generateSessionId() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	sessionId := fmt.Sprintf("sess_%s", base32.StdEncoding.EncodeToString(b))
+
+	return sessionId, nil
 }

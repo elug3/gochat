@@ -3,7 +3,9 @@ package auth
 import (
 	"flag"
 	"os"
+	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,6 +22,8 @@ type Options struct {
 
 	// debug disables recovery middleware
 	debug bool
+
+	LogLevel zerolog.Level
 
 	NatsUrl  string
 	NoEvents bool
@@ -103,4 +107,10 @@ func ConfigureOptions(fs *flag.FlagSet, args []string) (*Options, error) {
 	}
 
 	return &opts, nil
+}
+
+type CreateApiTokenOptions struct {
+	Name     string
+	Scope    []string
+	ExpireIn time.Duration
 }

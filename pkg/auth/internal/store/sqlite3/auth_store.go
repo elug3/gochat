@@ -3,11 +3,15 @@ package sqlite3
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha512"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
+	"time"
 
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/model"
@@ -17,6 +21,13 @@ import (
 
 type AuthStore struct {
 	db *sql.DB
+}
+
+type ApiTokenOptions struct {
+	Name     string
+	Prefix   string
+	Scopes   []string
+	ExpireIn int64 // seconds
 }
 
 func NewAuthStore(saveDir string, inMemory bool) (*AuthStore, error) {
@@ -48,23 +59,14 @@ func (store *AuthStore) DB() *sql.DB {
 }
 
 func (store *AuthStore) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*model.User, error) {
-	result, err := tx.QueryContext(ctx, `
+	var u model.User
+	err := tx.QueryRowContext(ctx, `
 	INSERT INTO users (username)
 	VALUES (?)
 	RETURNING id, username;
-	`, username)
+	`, username).Scan(&u.Id, &u.Username)
 	if err != nil {
 		return nil, fmt.Errorf("cannot insert user: %w", err)
-	}
-	defer result.Close()
-
-	var u model.User
-	if result.Next() {
-		if err := result.Scan(&u.Id, &u.Username); err != nil {
-			return nil, fmt.Errorf("cannot scan inserted user: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("no user returned after insert")
 	}
 
 	return &u, nil
@@ -113,7 +115,46 @@ func (store *AuthStore) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, u
 	return &pw, nil
 }
 
-func (store *AuthStore) SaveSessionData(ctx context.Context, tx *sql.Tx, session *webauthn.SessionData) error {
+func (store *AuthStore) SaveSession(ctx context.Context, tx *sql.Tx, userId int32, sessionHash string, ip net.IP, userAgent string, createdAt, expiresAt time.Time) error {
+
+	_, err := tx.ExecContext(ctx, `
+	INSERT INTO sessions (session_hash, user_id, ip, user_agent, created_at, expires_at)
+	VALUES (?, ?, ?, ?, ?, ?);
+	`, sessionHash, userId, ip.String(), userAgent, createdAt, expiresAt)
+	if err != nil {
+		return fmt.Errorf("cannot insert session: %w", err)
+	}
+	return nil
+}
+
+func (store *AuthStore) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessionHash string) (*model.Session, error) {
+	var (
+		session model.Session
+		ip      string
+	)
+	err := tx.QueryRowContext(ctx, `
+	SELECT session_hash, user_id, ip, user_agent, created_at, expires_at, revoked_at
+	FROM sessions
+	WHERE session_hash = ?;`, sessionHash).Scan(
+		&session.SessionId,
+		&session.UserId,
+		&ip,
+		&session.UserAgent,
+		&session.CreatedAt,
+		&session.ExpiresAt,
+		&session.RevokedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errs.ErrNotFound
+		}
+		return nil, fmt.Errorf("cannot get session: %w", err)
+	}
+	session.IP = net.ParseIP(ip)
+	return &session, nil
+}
+
+func (store *AuthStore) SaveWebauthnSessionData(ctx context.Context, tx *sql.Tx, session *webauthn.SessionData) error {
 	data, err := json.Marshal(session)
 	if err != nil {
 		return fmt.Errorf("cannot marshal session data: %w", err)
@@ -130,7 +171,7 @@ func (store *AuthStore) SaveSessionData(ctx context.Context, tx *sql.Tx, session
 	return nil
 }
 
-func (store *AuthStore) GetSessionData(ctx context.Context, tx *sql.Tx, challenge string) (*webauthn.SessionData, error) {
+func (store *AuthStore) GetWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) (*webauthn.SessionData, error) {
 	row := tx.QueryRowContext(ctx, `
 	SELECT session_data
 	FROM webauthn_sessions
@@ -153,7 +194,7 @@ func (store *AuthStore) GetSessionData(ctx context.Context, tx *sql.Tx, challeng
 	return &session, nil
 }
 
-func (store *AuthStore) DeleteSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
+func (store *AuthStore) DeleteWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
 	_, err := tx.ExecContext(ctx, `
 	DELETE FROM webauthn_sessions
 	WHERE challenge = ?;
@@ -370,6 +411,9 @@ func initdb(ctx context.Context, db *sql.DB) error {
 	if err := initWebAuthnTable(ctx, tx); err != nil {
 		return err
 	}
+	if err := initSessionTable(ctx, tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("cannot commit transaction: %w", err)
 	}
@@ -404,6 +448,54 @@ func initPasswordTable(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return fmt.Errorf("cannot create passwords table: %w", err)
 	}
+	return nil
+}
+
+func initSessionTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE IF NOT EXISTS sessions (
+		session_hash TEXT PRIMARY KEY,
+		user_id INTEGER NOT NULL,
+		ip TEXT NOT NULL,
+		user_agent TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME NOT NULL,
+		revoked_at DATETIME,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+	`)
+	if err != nil {
+		return fmt.Errorf("cannot create sessions table: %w", err)
+	}
+	return nil
+}
+
+func initApiTokenTable(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE IF NOT EXISTS api_tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		token_hint TEXT NOT NULL UNIQUE,
+		token_hash TEXT NOT NULL,
+		name TEXT NOT NULL,
+		scopes JSON NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME,
+		revoked_at DATETIME,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE;
+	);`)
+	if err != nil {
+		return fmt.Errorf("cannot create api_tokens table: %w", err)
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+	CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+	CREATE INDEX IF NOT EXISTS idx_api_tokens_token_prefix ON api_tokens(token_prefix);
+	`); err != nil {
+		return fmt.Errorf("cannot create api_tokens indexes: %w", err)
+	}
+
 	return nil
 }
 
@@ -445,4 +537,14 @@ func randomIdBytes() ([]byte, error) {
 
 func userHandlerIDBytes(userId int32) []byte {
 	return []byte(strconv.FormatInt(int64(userId), 10))
+}
+
+func hashApiToken(token string) (string, error) {
+	hasher := sha512.New512_256()
+	_, err := hasher.Write([]byte(token))
+	if err != nil {
+		return "", fmt.Errorf("cannot hash api token: %w", err)
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+
 }

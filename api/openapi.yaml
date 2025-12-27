@@ -1,0 +1,1075 @@
+openapi: 3.0.3
+info:
+  title: GoChat HTTP API
+  version: "0.1.0"
+  description: |
+    HTTP surface for the GoChat services (auth, contacts, chat view, messaging, presence, and users).
+    Endpoints are organised by service; authentication is per-endpoint (Basic for /login, Bearer for protected routes).
+servers:
+  - url: http://localhost:8080
+    description: Default API gateway/edge
+paths:
+  /me:
+    get:
+      summary: Get the user id for an access token
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Valid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthInfoResponse'
+        '400':
+          description: Missing or malformed Authorization header
+        '401':
+          description: Invalid token
+
+  /login:
+    post:
+      summary: Exchange username/password for an access token
+      security:
+        - BasicAuth: []
+      responses:
+        '200':
+          description: Login succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          description: Authorization header missing or invalid
+        '401':
+          description: Authentication failed
+
+  /register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          description: Invalid request body
+        '500':
+          description: Server error while creating the user
+
+  /.well-known/jwks.json:
+    get:
+      summary: Fetch the JWKS used to validate JWT access tokens
+      responses:
+        '200':
+          description: JWKS payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          description: JWKS not initialised
+
+  /ws:
+    get:
+      summary: Consume a one-time WebSocket token and return the associated user id
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Token accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WsUseResponse'
+        '400':
+          description: Token missing
+        '401':
+          description: Token invalid or expired
+    post:
+      summary: Create a short-lived WebSocket token for the current user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WsTokenResponse'
+        '401':
+          description: Authentication failed
+
+  /webauthn/register/begin:
+    post:
+      summary: Begin WebAuthn registration for the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: WebAuthn creation options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnCreationOptions'
+        '401':
+          description: Authentication required
+        '500':
+          description: Failed to start registration
+
+  /webauthn/register/finish:
+    post:
+      summary: Finish WebAuthn registration with the credential response
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnCredentialResponse'
+      responses:
+        '200':
+          description: Passkey stored
+        '400':
+          description: Invalid WebAuthn response payload
+        '401':
+          description: Authentication required
+        '500':
+          description: Failed to store the credential
+
+  /webauthn/login/begin:
+    post:
+      summary: Begin WebAuthn login
+      responses:
+        '200':
+          description: Assertion options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnRequestOptions'
+        '500':
+          description: Failed to start login
+
+  /webauthn/login/finish:
+    post:
+      summary: Finish WebAuthn login and obtain an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnCredentialResponse'
+      responses:
+        '200':
+          description: Login succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          description: Invalid assertion payload
+        '401':
+          description: Authentication failed
+
+  /webauthn/passkeys:
+    get:
+      summary: List passkeys for the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Passkeys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Passkey'
+        '401':
+          description: Authentication required
+
+  /webauthn/passkeys/{id}:
+    put:
+      summary: Update a passkey display name
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            format: int32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePasskeyRequest'
+      responses:
+        '200':
+          description: Updated passkey
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Passkey'
+        '400':
+          description: Invalid request
+        '401':
+          description: Authentication required
+        '500':
+          description: Update failed
+    delete:
+      summary: Delete a passkey
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Invalid passkey id
+        '401':
+          description: Authentication required
+        '500':
+          description: Delete failed
+
+  /groups:
+    get:
+      summary: List groups
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+        '500':
+          description: Failed to list groups
+
+  /groups/{group_id}:
+    get:
+      summary: Get a group by id
+      parameters:
+        - in: path
+          name: group_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          description: Invalid id
+        '403':
+          description: Not allowed or not found
+        '500':
+          description: Failed to load the group
+
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: One or more checks failed
+
+  /can:
+    get:
+      summary: Evaluate a user's permission for an action
+      parameters:
+        - in: query
+          name: user_id
+          required: true
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: chat_id
+          schema:
+            type: integer
+        - in: query
+          name: target_id
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: action
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permission result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessCheckResponse'
+        '400':
+          description: Invalid query parameters
+
+  /user/{user_id}/groups:
+    get:
+      summary: List groups for a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to list groups
+    post:
+      summary: Create a group owned by a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        '200':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          description: Invalid request
+        '409':
+          description: Group already exists
+        '500':
+          description: Failed to create group
+
+  /user/{user_id}/profile:
+    get:
+      summary: Get a user's profile
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          description: Invalid user id
+        '403':
+          description: Not allowed or not found
+        '500':
+          description: Failed to fetch profile
+    post:
+      summary: Create a profile for a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProfileRequest'
+      responses:
+        '200':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          description: Invalid request
+        '500':
+          description: Failed to create profile
+
+  /user/{user_id}/groups/{group_id}:
+    get:
+      summary: Get a group only if the user is a member
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          description: Invalid ids
+        '403':
+          description: Not a member or not found
+        '500':
+          description: Failed to fetch the group
+    delete:
+      summary: Delete a group (requires sufficient role)
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Invalid ids
+        '403':
+          description: Not permitted
+        '500':
+          description: Failed to delete group
+
+  /user/{user_id}/groups/{group_id}/members:
+    get:
+      summary: List members of a group
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Group members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Member'
+        '400':
+          description: Invalid ids
+        '403':
+          description: Not permitted
+        '500':
+          description: Failed to list members
+    post:
+      summary: Invite a user to a group
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteMemberRequest'
+      responses:
+        '200':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '400':
+          description: Invalid request
+        '403':
+          description: Not permitted
+        '409':
+          description: Member already exists
+        '500':
+          description: Failed to invite member
+
+  /user/{user_id}/groups/{group_id}/members/{member_id}:
+    delete:
+      summary: Remove a member from a group
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/GroupId'
+        - in: path
+          name: member_id
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '204':
+          description: Removed
+        '400':
+          description: Invalid ids
+        '403':
+          description: Not permitted
+        '500':
+          description: Failed to remove member
+
+  /user/{user_id}/contacts:
+    get:
+      summary: List contacts for a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contact'
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to list contacts
+    post:
+      summary: Add a contact
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContactRequest'
+      responses:
+        '200':
+          description: Contact created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          description: Invalid request
+        '403':
+          description: Not permitted
+        '409':
+          description: Contact already exists
+        '500':
+          description: Failed to create contact
+
+  /profiles:
+    get:
+      summary: List profiles
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+      responses:
+        '200':
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Profile'
+        '500':
+          description: Failed to list profiles
+
+  /profiles/{user_id}:
+    delete:
+      summary: Delete a profile
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to delete profile
+
+  /chat/{chat_id}/messages:
+    get:
+      summary: List messages for a chat
+      parameters:
+        - $ref: '#/components/parameters/ChatId'
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '400':
+          description: Invalid chat id
+        '500':
+          description: Failed to list messages
+
+  /user/{user_id}/chat/{chat_id}/messages:
+    get:
+      summary: List messages in a chat for a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/ChatId'
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '400':
+          description: Invalid ids
+        '500':
+          description: Failed to list messages
+
+  /user/{user_id}/messages:
+    post:
+      summary: Send a message as a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          description: Invalid request
+        '500':
+          description: Failed to send message
+
+  /user/{user_id}/chats:
+    get:
+      summary: List chat summaries for a user
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatSummary'
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to list chats
+
+  /users/{userId}/presence:
+    get:
+      summary: Get presence for a user
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: Presence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Presence'
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to fetch presence
+
+  /users/{user_id}:
+    get:
+      summary: Get user by id
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid user id
+        '500':
+          description: Failed to fetch user
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    BasicAuth:
+      type: http
+      scheme: basic
+  parameters:
+    UserId:
+      in: path
+      name: user_id
+      required: true
+      schema:
+        type: integer
+        format: int32
+    GroupId:
+      in: path
+      name: group_id
+      required: true
+      schema:
+        type: integer
+    ChatId:
+      in: path
+      name: chat_id
+      required: true
+      schema:
+        type: integer
+  schemas:
+    AuthInfoResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int32
+      required:
+        - user_id
+    AuthToken:
+      type: object
+      properties:
+        UserId:
+          type: integer
+          format: int32
+        AccessToken:
+          type: string
+          description: JWT access token
+        RefreshToken:
+          type: string
+          description: Reserved for future refresh support
+        ExpiresIn:
+          type: integer
+          format: int64
+          description: Token lifetime in nanoseconds
+        TokenType:
+          type: string
+      required:
+        - UserId
+        - AccessToken
+        - ExpiresIn
+    RegisterRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        name:
+          type: string
+        password:
+          type: string
+          format: password
+      required:
+        - username
+        - password
+    RegisterResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int32
+      required:
+        - user_id
+    WsTokenResponse:
+      type: object
+      properties:
+        ws_token:
+          type: string
+      required:
+        - ws_token
+    WsUseResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int32
+      required:
+        - user_id
+    WebAuthnCreationOptions:
+      type: object
+      description: CredentialCreation object returned by go-webauthn; fields follow the WebAuthn spec.
+      additionalProperties: true
+    WebAuthnRequestOptions:
+      type: object
+      description: CredentialRequestOptions for a WebAuthn login.
+      additionalProperties: true
+    WebAuthnCredentialResponse:
+      type: object
+      description: Client-side WebAuthn credential response payload.
+      additionalProperties: true
+    Passkey:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        key_name:
+          type: string
+        user_id:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - key_name
+        - user_id
+        - created_at
+    UpdatePasskeyRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        key_name:
+          type: string
+      required:
+        - id
+        - key_name
+    CreateGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+      required:
+        - name
+    Profile:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        name:
+          type: string
+        birthday:
+          type: string
+          format: date
+          nullable: true
+        icon_url:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+    CreateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
+    Group:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - created_at
+    Member:
+      type: object
+      properties:
+        group_id:
+          type: integer
+        user_id:
+          type: integer
+          format: int32
+        role:
+          type: string
+          description: access.Role value
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        icon_url:
+          type: string
+      required:
+        - group_id
+        - user_id
+        - role
+    InviteMemberRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int32
+      required:
+        - user_id
+    Contact:
+      type: object
+      properties:
+        profile_id:
+          type: integer
+          format: int32
+        name:
+          type: string
+        alias:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - profile_id
+        - name
+        - created_at
+    CreateContactRequest:
+      type: object
+      properties:
+        target_id:
+          type: integer
+          format: int32
+      required:
+        - target_id
+    AccessCheckResponse:
+      type: object
+      properties:
+        can:
+          type: boolean
+        action:
+          type: string
+        error:
+          type: string
+      required:
+        - can
+        - action
+    Message:
+      type: object
+      properties:
+        chat_id:
+          type: integer
+        sender:
+          type: integer
+        content:
+          type: string
+        id:
+          type: integer
+        sent_at:
+          type: string
+          format: date-time
+    SendMessageRequest:
+      type: object
+      properties:
+        chat_id:
+          type: integer
+        content:
+          type: string
+      required:
+        - chat_id
+        - content
+    ChatSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [direct, group]
+        name:
+          type: string
+        last_message:
+          type: string
+        last_message_at:
+          type: integer
+          format: int64
+          description: Unix timestamp seconds
+        last_sender_id:
+          type: integer
+        unread_count:
+          type: integer
+        pinned:
+          type: boolean
+        muted:
+          type: boolean
+      required:
+        - id
+        - type
+        - name
+    Presence:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int32
+        state:
+          type: string
+          enum: [online, offline]
+        last_seen:
+          type: integer
+          format: int64
+          description: Unix timestamp seconds
+      required:
+        - user_id
+        - state
+        - last_seen
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        username:
+          type: string
+      required:
+        - id
+        - username
+    HealthResponse:
+      type: object
+      description: Arbitrary health payload; keys include a database status map.
+      additionalProperties: true

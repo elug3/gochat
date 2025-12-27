@@ -1,0 +1,19 @@
+{
+	"name": "APP_STREAM",
+	"subjects": [
+		"auth.>",
+		"contacts.>",
+		"messages.>",
+		"websocket.>"
+	],
+	"discard": "old",
+	"max_msg_side": -1,
+	"max_bytes": -1,
+	"storage": "file",
+	"max_age": 0,
+	"max_consumers": -1,
+	"max_msgs_per_subject": -1,
+	"num_replicas": 1,
+	"max_msgs": -1,
+	"retention": "limits"
+}
