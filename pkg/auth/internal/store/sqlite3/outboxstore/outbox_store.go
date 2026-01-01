@@ -1,4 +1,4 @@
-package sqlite3
+package outboxstore
 
 import (
 	"context"
@@ -9,21 +9,13 @@ import (
 	"github.com/elug3/gochat/pkg/auth/internal/model"
 )
 
-type OutboxStore struct {
+type Store struct {
 	db *sql.DB
 }
 
-func NewOutboxStore(db *sql.DB) (*OutboxStore, error) {
+func NewStore(ctx context.Context, db *sql.DB) (*Store, error) {
 	if db == nil {
 		return nil, fmt.Errorf("db is required")
-	}
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `
-	PRAGMA journal_mode = WAL;
-	PRAGMA busy_timeout = 5000;
-	PRAGMA synchronous = NORMAL;
-	`); err != nil {
-		return nil, fmt.Errorf("failed to set sqlite pragmas: %w", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -37,18 +29,19 @@ func NewOutboxStore(db *sql.DB) (*OutboxStore, error) {
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit: %w", err)
 	}
-	return &OutboxStore{db: db}, nil
+	return &Store{db: db}, nil
 }
 
-func (store *OutboxStore) Insert(ctx context.Context, tx *sql.Tx, row *model.OutboxRecord) error {
-	if row == nil {
-		return fmt.Errorf("outbox record is required")
-	}
+func (store *Store) Insert(ctx context.Context, row model.OutboxRecord) error {
 	if row.Id == "" {
 		return fmt.Errorf("outbox record id is required")
 	}
 	if row.Subject == "" {
 		return fmt.Errorf("outbox record subject is required")
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginTx: %w", err)
 	}
 	createdAt := row.CreatedAt
 	if createdAt == 0 {
@@ -62,7 +55,7 @@ func (store *OutboxStore) Insert(ctx context.Context, tx *sql.Tx, row *model.Out
 	if attempts < 0 {
 		attempts = 0
 	}
-	_, err := store.execContext(ctx, tx, `
+	_, err = store.execContext(ctx, tx, `
 	INSERT INTO outbox_events (
 		id, subject, payload, created_at, available_at, attempts
 	) VALUES (?, ?, ?, ?, ?, ?);
@@ -73,7 +66,7 @@ func (store *OutboxStore) Insert(ctx context.Context, tx *sql.Tx, row *model.Out
 	return nil
 }
 
-func (store *OutboxStore) ClaimBatch(
+func (store *Store) ClaimBatch(
 	ctx context.Context,
 	workerId string,
 	limit int,
@@ -174,7 +167,7 @@ func (store *OutboxStore) ClaimBatch(
 	return events, nil
 }
 
-func (store *OutboxStore) MarkCompleted(ctx context.Context, tx *sql.Tx, workerId, id string) error {
+func (store *Store) MarkCompleted(ctx context.Context, tx *sql.Tx, workerId, id string) error {
 	if id == "" {
 		return fmt.Errorf("outbox event id is required")
 	}
@@ -202,7 +195,7 @@ func (store *OutboxStore) MarkCompleted(ctx context.Context, tx *sql.Tx, workerI
 	return nil
 }
 
-func (store *OutboxStore) Requeue(ctx context.Context, tx *sql.Tx, workerId, id string, availableAt int64, lastError string) error {
+func (store *Store) Requeue(ctx context.Context, tx *sql.Tx, workerId, id string, availableAt int64, lastError string) error {
 	if id == "" {
 		return fmt.Errorf("outbox event id is required")
 	}
@@ -234,7 +227,7 @@ func (store *OutboxStore) Requeue(ctx context.Context, tx *sql.Tx, workerId, id 
 	return nil
 }
 
-func (store *OutboxStore) MarkFailed(ctx context.Context, tx *sql.Tx, workerId, id string, lastError string) error {
+func (store *Store) MarkFailed(ctx context.Context, tx *sql.Tx, workerId, id string, lastError string) error {
 	if id == "" {
 		return fmt.Errorf("outbox event id is required")
 	}
@@ -263,6 +256,14 @@ func (store *OutboxStore) MarkFailed(ctx context.Context, tx *sql.Tx, workerId, 
 }
 
 func initOutboxEventTable(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `
+	PRAGMA journal_mode = WAL;
+	PRAGMA busy_timeout = 5000;
+	PRAGMA synchronous = NORMAL;
+	`); err != nil {
+		return fmt.Errorf("failed to set sqlite pragmas: %w", err)
+	}
+
 	_, err := tx.ExecContext(ctx, `
 	CREATE TABLE IF NOT EXISTS outbox_events (
 		id TEXT PRIMARY KEY,                -- UUID string
@@ -299,7 +300,7 @@ func initOutboxEventTable(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func (store *OutboxStore) execContext(ctx context.Context, tx *sql.Tx, query string, args ...any) (sql.Result, error) {
+func (store *Store) execContext(ctx context.Context, tx *sql.Tx, query string, args ...any) (sql.Result, error) {
 	if tx != nil {
 		return tx.ExecContext(ctx, query, args...)
 	}

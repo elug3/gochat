@@ -9,3 +9,5 @@ var (
 	ErrExists                = errors.New("already exists")
 	ErrConstraint            = errors.New("constraint violation")
 )
+
+type PermissionError struct{}

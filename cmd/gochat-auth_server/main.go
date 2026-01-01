@@ -1,26 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 
 	authsrv "github.com/elug3/gochat/pkg/auth"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
-
-var usageStr = `
-Usage: gochat-auth [option]...
-
-Server Options:
-	-H, --host <host>		Bind to host address (default: 0.0.0.0)
-	-p, --port <port>		Port to run the server on (default: 8080)
-
-Command Options:
-	-h			 		Show this help message
-	-v			 		Show version
-`
 
 func printUsage() {
 	print(usageStr)
@@ -28,25 +16,26 @@ func printUsage() {
 }
 
 func main() {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
 	fs := flag.NewFlagSet("gochat-auth_server", flag.ExitOnError)
 	fs.Usage = printUsage
 
-	opts, err := authsrv.ConfigureOptions(fs, os.Args[1:])
+	opts, err := ConfigureOptions(fs, os.Args[1:])
 	if err != nil {
 		fmt.Printf("cannot parse command line options: %v:\n", err)
 		os.Exit(1)
 	}
 
-	s, err := authsrv.NewHttpServer(opts)
+	srv, err := authsrv.NewServer(opts)
 	if err != nil {
 		fmt.Printf("cannot create auth server: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := s.Run(); err != nil {
-		fmt.Printf("auth server error: %v\n", err)
+	if err := srv.Run(ctx); err != nil {
 		os.Exit(1)
 	}
 }

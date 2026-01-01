@@ -17,40 +17,26 @@ import (
 	"github.com/alexedwards/argon2id"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
-	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
+	"github.com/elug3/gochat/pkg/auth/internal/model"
+	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3/authstore"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/patrickmn/go-cache"
-
-	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/patrickmn/go-cache"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 type AuthService struct {
-	logger *zerolog.Logger
-	store  *sqlite3.AuthStore
-	db     *sql.DB
-
-	jwtKey   *rsa.PrivateKey
-	jwks     *jwk.Jwks
-	wsTokens *cache.Cache
-
-	wAuth *webauthn.WebAuthn
-
-	eventPub *events.Publisher
-}
-
-type ServiceDeps struct {
-	Logger   *zerolog.Logger
-	Store    *sqlite3.AuthStore
-	JWTKey   *rsa.PrivateKey
-	Jwks     *jwk.Jwks
-	WsTokens *cache.Cache
-	WebAuthn *webauthn.WebAuthn
-	EventPub *events.Publisher
+	logger    *zerolog.Logger
+	authStore *authstore.Store
+	jwtKey    *rsa.PrivateKey
+	jwks      *jwk.Jwks
+	webAuthn  *webauthn.WebAuthn
+	wsTokens  cache.Cache
+	publisher *events.Publisher
+	worker    *worker
 }
 
 type Client struct {
@@ -63,30 +49,37 @@ var (
 	RefreshTokenExpiry = 7 * 24 * time.Hour // 7 days
 )
 
-func NewAuthService(deps ServiceDeps) (*AuthService, error) {
-	if deps.Store == nil {
-		return nil, fmt.Errorf("%w: auth store is required", ErrInvalidConfig)
+func NewService(
+	logger *zerolog.Logger,
+	authStore *authstore.Store,
+	jwtKey *rsa.PrivateKey,
+	jwks *jwk.Jwks,
+	webAuthn *webauthn.WebAuthn,
+	publisher *events.Publisher,
+) (*AuthService, error) {
+	if logger == nil {
+		return nil, fmt.Errorf("missing logger")
 	}
-	if deps.JWTKey == nil {
-		return nil, fmt.Errorf("%w: jwt key is required", ErrInvalidConfig)
+	if authStore == nil {
+		return nil, fmt.Errorf("missing auth store")
 	}
-	if deps.Jwks == nil {
-		return nil, fmt.Errorf("%w: jwks is required", ErrInvalidConfig)
+	if jwtKey == nil {
+		return nil, fmt.Errorf("missing jwt key")
 	}
-	if deps.WsTokens == nil {
-		return nil, fmt.Errorf("%w: ws token cache is required", ErrInvalidConfig)
+	if jwks == nil {
+		return nil, fmt.Errorf("missing jwks")
 	}
-	if deps.WebAuthn == nil {
-		return nil, fmt.Errorf("%w: webauthn is required", ErrInvalidConfig)
+	if webAuthn == nil {
+		return nil, fmt.Errorf("missing webAuthn")
 	}
+
 	return &AuthService{
-		logger:   deps.Logger,
-		store:    deps.Store,
-		jwtKey:   deps.JWTKey,
-		jwks:     deps.Jwks,
-		wsTokens: deps.WsTokens,
-		eventPub: deps.EventPub,
-		wAuth:    deps.WebAuthn,
+		logger:    logger,
+		authStore: authStore,
+		jwtKey:    jwtKey,
+		jwks:      jwks,
+		webAuthn:  webAuthn,
+		publisher: publisher,
 	}, nil
 }
 
@@ -101,7 +94,7 @@ func credentialsRule(username, password string) error {
 }
 
 func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (*model.User, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.authStore.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
@@ -115,33 +108,31 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password, name
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	u, err := s.store.CreateUser(ctx, tx, username)
+	u, err := s.authStore.CreateUser(ctx, tx, username)
 	if err != nil {
 		return nil, fmt.Errorf("create user %q: %w", username, err)
 	}
 
-	if err = s.store.SetPasswordHash(ctx, tx, u.Id, passwordHash); err != nil {
+	if err = s.authStore.SetPasswordHash(ctx, tx, u.Id, passwordHash); err != nil {
 		return nil, fmt.Errorf("set password hash user %d: %w", u.Id, err)
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if s.eventPub != nil {
-		if err = s.eventPub.Publish(events.UserRegistered{
-			UserId:    u.Id,
-			Username:  username,
-			Timestamp: time.Now().Unix(),
-		}); err != nil {
-			log.Err(err).Msg("failed to publish user registered event")
-		}
+	if err = s.worker.Publish(ctx, events.UserRegistered{
+		UserId:    u.Id,
+		Username:  u.Username,
+		Timestamp: time.Now().Unix(),
+	}); err != nil {
+		return nil, fmt.Errorf("publish: %w", err)
 	}
 
 	return u, nil
 }
 
 func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -151,7 +142,7 @@ func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password st
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	if err = s.store.SetPasswordHash(ctx, tx, uid, passwordHash); err != nil {
+	if err = s.authStore.SetPasswordHash(ctx, tx, uid, passwordHash); err != nil {
 		return fmt.Errorf("set password hash user %d: %w", uid, err)
 	}
 
@@ -174,13 +165,13 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 	sessionDuration := 7 * 24 * time.Hour // TODO: make configurable
 	expiresAt := time.Now().Add(sessionDuration)
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	pw, err := s.store.GetPasswordByUsername(ctx, tx, username)
+	pw, err := s.authStore.GetPasswordByUsername(ctx, tx, username)
 	if err != nil {
 		return nil, fmt.Errorf("get password hash %q: %w", username, err)
 	}
@@ -199,7 +190,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 	}
 
 	createdAt := time.Now()
-	if err = s.store.SaveSession(ctx, tx, pw.UserId, sessionHash, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
+	if err = s.authStore.SaveSession(ctx, tx, pw.UserId, sessionHash, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
@@ -207,8 +198,8 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if s.eventPub != nil {
-		if err = s.eventPub.Publish(events.UserLoggedIn{
+	if s.publisher != nil {
+		if err = s.publisher.Publish(events.UserLoggedIn{
 			UserId:    pw.UserId,
 			Username:  username,
 			IP:        client.IP,
@@ -230,7 +221,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 }
 
 func (s *AuthService) Exchange(ctx context.Context, sessionId string, requestedAudiences, requestedScopes []string, requestedTTL int64) (*model.Token, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
@@ -254,7 +245,7 @@ func (s *AuthService) validateSession(ctx context.Context, tx *sql.Tx, sessionId
 	if err != nil {
 		return nil, fmt.Errorf("hash session id: %w", err)
 	}
-	session, err := s.store.GetSessionByHash(ctx, tx, hash)
+	session, err := s.authStore.GetSessionByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
@@ -265,18 +256,18 @@ func (s *AuthService) validateSession(ctx context.Context, tx *sql.Tx, sessionId
 }
 
 func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (*protocol.CredentialCreation, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
+	u, err := s.authStore.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("load webauthn user %d: %w", userId, err)
 	}
 
-	creation, session, err := s.wAuth.BeginMediatedRegistration(u, protocol.MediationOptional,
+	creation, session, err := s.webAuthn.BeginMediatedRegistration(u, protocol.MediationOptional,
 		webauthn.WithExclusions(webauthn.Credentials(u.WebAuthnCredentials()).CredentialDescriptors()),
 		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementPreferred),
 		webauthn.WithExtensions(map[string]any{"creProps": true}),
@@ -285,7 +276,7 @@ func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (
 		return nil, fmt.Errorf("begin registration: %w", err)
 	}
 
-	if err = s.store.SaveWebauthnSessionData(ctx, tx, session); err != nil {
+	if err = s.authStore.SaveWebauthnSessionData(ctx, tx, session); err != nil {
 		return nil, fmt.Errorf("save session data: %w", err)
 	}
 
@@ -297,7 +288,7 @@ func (s *AuthService) WebAuthnRegisterBegin(ctx context.Context, userId int32) (
 }
 
 func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, pcc *protocol.ParsedCredentialCreationData) error {
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -305,27 +296,27 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 
 	credentialName := "my_passkey" // TODO: get from request
 
-	u, err := s.store.GetWebAuthnUser(ctx, tx, userId)
+	u, err := s.authStore.GetWebAuthnUser(ctx, tx, userId)
 	if err != nil {
 		return fmt.Errorf("load webauthn user %d: %w", userId, err)
 	}
 
 	challenge := pcc.Response.CollectedClientData.Challenge
 
-	session, err := s.store.GetWebauthnSessionData(ctx, tx, challenge)
+	session, err := s.authStore.GetWebauthnSessionData(ctx, tx, challenge)
 	if err != nil {
 		return fmt.Errorf("get session data: %w", err)
 	}
-	credential, err := s.wAuth.CreateCredential(u, *session, pcc)
+	credential, err := s.webAuthn.CreateCredential(u, *session, pcc)
 	if err != nil {
 		return fmt.Errorf("create credential: %w", err)
 	}
 
-	if err = s.store.SaveWebAuthnCredential(ctx, tx, userId, credentialName, credential); err != nil {
+	if err = s.authStore.SaveWebAuthnCredential(ctx, tx, userId, credentialName, credential); err != nil {
 		return fmt.Errorf("save webauthn credential: %w", err)
 	}
 
-	if err = s.store.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
+	if err = s.authStore.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
 		return fmt.Errorf("delete session data: %w", err)
 	}
 
@@ -338,17 +329,17 @@ func (s *AuthService) WebAuthnRegisterFinish(ctx context.Context, userId int32, 
 }
 
 func (s *AuthService) WebAuthnLoginBegin(ctx context.Context) (*protocol.CredentialAssertion, error) {
-	assertion, session, err := s.wAuth.BeginDiscoverableMediatedLogin(protocol.MediationOptional)
+	assertion, session, err := s.webAuthn.BeginDiscoverableMediatedLogin(protocol.MediationOptional)
 	if err != nil {
 		return nil, fmt.Errorf("begin login: %w", err)
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	if err = s.store.SaveWebauthnSessionData(ctx, tx, session); err != nil {
+	if err = s.authStore.SaveWebauthnSessionData(ctx, tx, session); err != nil {
 		return nil, fmt.Errorf("save session data: %w", err)
 	}
 
@@ -364,7 +355,7 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 		u   *model.WebAuthnUser
 		err error
 	)
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
@@ -372,17 +363,17 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 
 	challenge := parsedResponse.Response.CollectedClientData.Challenge
 
-	webauthnSession, err := s.store.GetWebauthnSessionData(ctx, tx, challenge)
+	webauthnSession, err := s.authStore.GetWebauthnSessionData(ctx, tx, challenge)
 	if err != nil {
 		return nil, fmt.Errorf("get session data: %w", err)
 	}
 
-	credential, err := s.wAuth.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (user webauthn.User, err error) {
+	credential, err := s.webAuthn.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (user webauthn.User, err error) {
 		uid, err := model.UserIdFromUserHandler(userHandle)
 		if err != nil {
 			return nil, fmt.Errorf("invalid user handle: %w", err)
 		}
-		if u, err = s.store.GetWebAuthnUser(ctx, tx, uid); err != nil {
+		if u, err = s.authStore.GetWebAuthnUser(ctx, tx, uid); err != nil {
 			return nil, fmt.Errorf("load webauthn user %d: %w", uid, err)
 		}
 		return u, nil
@@ -391,11 +382,11 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 		return nil, fmt.Errorf("validate login: %w", err)
 	}
 
-	if err = s.store.UpdateWebAuthnCredentialAfterLogin(ctx, tx, u.Id, credential); err != nil {
+	if err = s.authStore.UpdateWebAuthnCredentialAfterLogin(ctx, tx, u.Id, credential); err != nil {
 		return nil, fmt.Errorf("update webauthn credential: %w", err)
 	}
 
-	if err = s.store.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
+	if err = s.authStore.DeleteWebauthnSessionData(ctx, tx, challenge); err != nil {
 		return nil, fmt.Errorf("delete session data: %w", err)
 	}
 
@@ -409,7 +400,7 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 	}
 
 	createdAt := time.Now()
-	if err = s.store.SaveSession(ctx, tx, u.Id, sessionHsah, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
+	if err = s.authStore.SaveSession(ctx, tx, u.Id, sessionHsah, client.IP, client.UserAgent, createdAt, expiresAt); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
@@ -428,13 +419,13 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 }
 
 func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32) ([]model.Passkey, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	passkeys, err := s.store.GetPasskeysByUserId(ctx, tx, userId)
+	passkeys, err := s.authStore.GetPasskeysByUserId(ctx, tx, userId)
 	if err != nil {
 		return nil, fmt.Errorf("get passkeys: %w", err)
 	}
@@ -443,13 +434,13 @@ func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32)
 }
 
 func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkeyId int32, newName string) (*model.Passkey, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	passkey, err := s.store.UpdatePasskey(ctx, tx, passkeyId, newName)
+	passkey, err := s.authStore.UpdatePasskey(ctx, tx, passkeyId, newName)
 	if err != nil {
 		return nil, fmt.Errorf("update passkey %d: %w", passkeyId, err)
 	}
@@ -465,13 +456,13 @@ func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkey
 }
 
 func (s *AuthService) DeleteWebAuthnPasskey(ctx context.Context, userId, passkeyId int32) error {
-	tx, err := s.db.Begin()
+	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	passkey, err := s.store.DeletePasskeyById(ctx, tx, passkeyId)
+	passkey, err := s.authStore.DeletePasskeyById(ctx, tx, passkeyId)
 	if err != nil {
 		return fmt.Errorf("delete passkey %d: %w", passkeyId, err)
 	}
@@ -523,7 +514,7 @@ func (s *AuthService) CreateWsToken(ctx context.Context, accessToken string) (st
 
 func (s *AuthService) createWsToken(ctx context.Context, userId int32) (string, error) {
 	token := rand.Text()
-	s.wsTokens.Set(token, userId, time.Second*300) // 5 minutes
+	s.wsTokens.Set(token, userId, time.Second*300) // 5 minute
 
 	return token, nil
 }
@@ -549,7 +540,7 @@ func (s *AuthService) GetJwksData() ([]byte, error) {
 }
 
 func (s *AuthService) Close() error {
-	return s.store.Close()
+	return s.authStore.Close()
 }
 
 func newToken(userId int32, jwtKey *rsa.PrivateKey, audiences []string, TTL int64) (*model.Token, error) {

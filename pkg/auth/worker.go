@@ -2,11 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/elug3/gochat/pkg/auth/internal/model"
-	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3"
+	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3/outboxstore"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/google/uuid"
 )
@@ -20,7 +21,7 @@ const (
 )
 
 type WorkerConfig struct {
-	Outbox       *sqlite3.OutboxStore
+	Outbox       *outboxstore.Store
 	Publisher    *events.Publisher
 	ID           string
 	BatchSize    int
@@ -31,7 +32,7 @@ type WorkerConfig struct {
 }
 
 type worker struct {
-	outbox       *sqlite3.OutboxStore
+	outbox       *outboxstore.Store
 	publisher    *events.Publisher
 	id           string
 	batchSize    int
@@ -84,14 +85,31 @@ func NewWorker(cfg WorkerConfig) (*worker, error) {
 	}, nil
 }
 
-func (w *worker) Publish(ctx context.Context, row *model.OutboxRecord) error {
+func (w *worker) Publish(ctx context.Context, ev events.Event) error {
 	if w == nil {
 		return fmt.Errorf("worker is nil")
 	}
-	if row == nil {
-		return fmt.Errorf("outbox record is required")
+	if ev == nil {
+		return fmt.Errorf("event is nil")
 	}
-	return w.outbox.Insert(ctx, nil, row)
+
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+
+	err = w.outbox.Insert(ctx, model.OutboxRecord{
+		Id:          uuid.NewString(),
+		Subject:     ev.Subject(),
+		Payload:     payload,
+		CreatedAt:   time.Now().Unix(),
+		AvailableAt: time.Now().Unix(),
+		Attempts:    0,
+	})
+	if err != nil {
+		return fmt.Errorf("outbox insert: %w", err)
+	}
+	return nil
 }
 
 func (w *worker) Run(ctx context.Context) {
@@ -147,6 +165,7 @@ func (w *worker) handleFailure(ctx context.Context, row model.OutboxEvent, publi
 
 func (w *worker) sleep(ctx context.Context) {
 	if w.pollInterval <= 0 {
+
 		return
 	}
 	timer := time.NewTimer(w.pollInterval)

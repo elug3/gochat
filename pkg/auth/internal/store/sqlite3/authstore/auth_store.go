@@ -1,4 +1,4 @@
-package sqlite3
+package authstore
 
 import (
 	"context"
@@ -16,10 +16,10 @@ import (
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/go-webauthn/webauthn/webauthn"
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
-type AuthStore struct {
+type Store struct {
 	db *sql.DB
 }
 
@@ -30,35 +30,26 @@ type ApiTokenOptions struct {
 	ExpireIn int64 // seconds
 }
 
-func NewAuthStore(saveDir string, inMemory bool) (*AuthStore, error) {
-	var db *sql.DB
-	var path string
-	if inMemory {
-		path = "file::memory:?cache=shared"
-	} else {
-		path = saveDir + "/auth.db"
-	}
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx := context.Background()
-	if err = initdb(ctx, db); err != nil {
+func NewAuthStore(ctx context.Context, db *sql.DB) (*Store, error) {
+	if err := initdb(ctx, db); err != nil {
 		return nil, fmt.Errorf("cannot initialize database: %w", err)
 	}
 
-	return &AuthStore{db: db}, nil
+	return &Store{db: db}, nil
 }
 
-func (store *AuthStore) DB() *sql.DB {
+func (store *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return store.db.BeginTx(ctx, opts)
+}
+
+func (store *Store) DB() *sql.DB {
 	if store.db == nil {
 		panic("database not initialized")
 	}
 	return store.db
 }
 
-func (store *AuthStore) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*model.User, error) {
+func (store *Store) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*model.User, error) {
 	var u model.User
 	err := tx.QueryRowContext(ctx, `
 	INSERT INTO users (username)
@@ -66,40 +57,38 @@ func (store *AuthStore) CreateUser(ctx context.Context, tx *sql.Tx, username str
 	RETURNING id, username;
 	`, username).Scan(&u.Id, &u.Username)
 	if err != nil {
-		return nil, fmt.Errorf("cannot insert user: %w", err)
+		return nil, fmt.Errorf("cannot insert user: %w", handleSqlError(err))
 	}
 
 	return &u, nil
 }
 
-func (store *AuthStore) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (*model.User, error) {
+func (store *Store) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (*model.User, error) {
 	var u model.User
 	err := tx.QueryRowContext(ctx, `
 	SELECT id, username
 	FROM users
 	WHERE id = ?;`, userId).Scan(&u.Id, &u.Username)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errs.ErrNotFound
-		}
+		return nil, fmt.Errorf("cannot get user: %w", handleSqlError(err))
 	}
 	return &u, nil
 }
 
-func (store *AuthStore) SetPasswordHash(ctx context.Context, tx *sql.Tx, userId int32, passwordHash string) error {
+func (store *Store) SetPasswordHash(ctx context.Context, tx *sql.Tx, userId int32, passwordHash string) error {
 	_, err := tx.ExecContext(ctx, `
 	INSERT INTO passwords (user_id, password_hash)
 	VALUES (?, ?)
 	ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash, updated_at=CURRENT_TIMESTAMP;
 	`, userId, passwordHash)
 	if err != nil {
-		return fmt.Errorf("cannot update password hash: %w", err)
+		return fmt.Errorf("cannot update password hash: %w", handleSqlError(err))
 	}
 
 	return nil
 }
 
-func (store *AuthStore) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, username string) (*model.PasswordCredential, error) {
+func (store *Store) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, username string) (*model.PasswordCredential, error) {
 	var pw model.PasswordCredential
 	err := tx.QueryRowContext(ctx, `
 	SELECT p.user_id, u.username, p.password_hash
@@ -107,30 +96,28 @@ func (store *AuthStore) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, u
 	JOIN users as u ON u.id = p.user_id
 	WHERE u.username = ?;`, username).Scan(&pw.UserId, &pw.Username, &pw.PasswordHash)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errs.ErrNotFound
-		}
-		return nil, fmt.Errorf("cannot get password: %w", err)
+		return nil, fmt.Errorf("cannot get password: %w", handleSqlError(err))
 	}
 	return &pw, nil
 }
 
-func (store *AuthStore) SaveSession(ctx context.Context, tx *sql.Tx, userId int32, sessionHash string, ip net.IP, userAgent string, createdAt, expiresAt time.Time) error {
+func (store *Store) SaveSession(ctx context.Context, tx *sql.Tx, userId int32, sessionHash string, ip net.IP, userAgent string, createdAt, expiresAt time.Time) error {
 
 	_, err := tx.ExecContext(ctx, `
 	INSERT INTO sessions (session_hash, user_id, ip, user_agent, created_at, expires_at)
 	VALUES (?, ?, ?, ?, ?, ?);
 	`, sessionHash, userId, ip.String(), userAgent, createdAt, expiresAt)
 	if err != nil {
-		return fmt.Errorf("cannot insert session: %w", err)
+		return fmt.Errorf("cannot insert session: %w", handleSqlError(err))
 	}
 	return nil
 }
 
-func (store *AuthStore) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessionHash string) (*model.Session, error) {
+func (store *Store) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessionHash string) (*model.Session, error) {
 	var (
 		session model.Session
 		ip      string
+		revoked sql.NullTime
 	)
 	err := tx.QueryRowContext(ctx, `
 	SELECT session_hash, user_id, ip, user_agent, created_at, expires_at, revoked_at
@@ -142,22 +129,22 @@ func (store *AuthStore) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessio
 		&session.UserAgent,
 		&session.CreatedAt,
 		&session.ExpiresAt,
-		&session.RevokedAt,
+		&revoked,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errs.ErrNotFound
-		}
-		return nil, fmt.Errorf("cannot get session: %w", err)
+		return nil, fmt.Errorf("cannot get session: %w", handleSqlError(err))
 	}
 	session.IP = net.ParseIP(ip)
+	if revoked.Valid {
+		session.RevokedAt = revoked.Time
+	}
 	return &session, nil
 }
 
-func (store *AuthStore) SaveWebauthnSessionData(ctx context.Context, tx *sql.Tx, session *webauthn.SessionData) error {
+func (store *Store) SaveWebauthnSessionData(ctx context.Context, tx *sql.Tx, session *webauthn.SessionData) error {
 	data, err := json.Marshal(session)
 	if err != nil {
-		return fmt.Errorf("cannot marshal session data: %w", err)
+		return fmt.Errorf("cannot marshal session data: %w", handleSqlError(err))
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -165,13 +152,13 @@ func (store *AuthStore) SaveWebauthnSessionData(ctx context.Context, tx *sql.Tx,
 	VALUES (?, ?);
 	`, session.Challenge, data)
 	if err != nil {
-		return fmt.Errorf("cannot insert session data: %w", err)
+		return fmt.Errorf("cannot insert session data: %w", handleSqlError(err))
 	}
 
 	return nil
 }
 
-func (store *AuthStore) GetWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) (*webauthn.SessionData, error) {
+func (store *Store) GetWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) (*webauthn.SessionData, error) {
 	row := tx.QueryRowContext(ctx, `
 	SELECT session_data
 	FROM webauthn_sessions
@@ -180,10 +167,7 @@ func (store *AuthStore) GetWebauthnSessionData(ctx context.Context, tx *sql.Tx, 
 
 	var data []byte
 	if err := row.Scan(&data); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errs.ErrNotFound
-		}
-		return nil, fmt.Errorf("cannot scan session data: %w", err)
+		return nil, fmt.Errorf("cannot scan session data: %w", handleSqlError(err))
 	}
 
 	var session webauthn.SessionData
@@ -194,22 +178,22 @@ func (store *AuthStore) GetWebauthnSessionData(ctx context.Context, tx *sql.Tx, 
 	return &session, nil
 }
 
-func (store *AuthStore) DeleteWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
+func (store *Store) DeleteWebauthnSessionData(ctx context.Context, tx *sql.Tx, challenge string) error {
 	_, err := tx.ExecContext(ctx, `
 	DELETE FROM webauthn_sessions
 	WHERE challenge = ?;
 	`, challenge)
 	if err != nil {
-		return fmt.Errorf("cannot delete session data: %w", err)
+		return fmt.Errorf("cannot delete session data: %w", handleSqlError(err))
 	}
 
 	return nil
 }
 
-func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential_name string, credential *webauthn.Credential) error {
+func (store *Store) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, userId int32, credential_name string, credential *webauthn.Credential) error {
 	data, err := json.Marshal(credential)
 	if err != nil {
-		return fmt.Errorf("cannot marshal credential data: %w", err)
+		return fmt.Errorf("cannot marshal credential data: %w", handleSqlError(err))
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -217,7 +201,7 @@ func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, 
 	VALUES (?, ?, ?);
 	`, userId, credential_name, data)
 	if err != nil {
-		return fmt.Errorf("cannot insert credential data: %w", err)
+		return fmt.Errorf("cannot insert credential data: %w", handleSqlError(err))
 	}
 
 	return nil
@@ -226,7 +210,7 @@ func (store *AuthStore) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, 
 // GetWebAuthnUser returns the WebAuthnUser for the given userId.
 // It returns empty credentials user for valid user with no credentials.
 // If user does not exist, returns errs.ErrNotFound.
-func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
+func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
 	var u model.User
 	row := tx.QueryRowContext(ctx, `
 	SELECT id, username
@@ -234,10 +218,7 @@ func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId 
 	WHERE id = ?;`, userId)
 	err := row.Scan(&u.Id, &u.Username)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errs.ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to query user: %w", err)
+		return nil, fmt.Errorf("failed to query user: %w", handleSqlError(err))
 	}
 	rows, err := tx.QueryContext(ctx, `
 	SELECT credential_data
@@ -245,7 +226,7 @@ func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId 
 	WHERE user_id = ?;
 	`, userId)
 	if err != nil {
-		return nil, fmt.Errorf("cannot query credential data: %w", err)
+		return nil, fmt.Errorf("cannot query credential data: %w", handleSqlError(err))
 	}
 	defer rows.Close()
 
@@ -253,7 +234,7 @@ func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId 
 	for rows.Next() {
 		var credData []byte
 		if err := rows.Scan(&credData); err != nil {
-			return nil, fmt.Errorf("cannot scan credential data: %w", err)
+			return nil, fmt.Errorf("cannot scan credential data: %w", handleSqlError(err))
 		}
 		var cred webauthn.Credential
 		if err := json.Unmarshal(credData, &cred); err != nil {
@@ -262,7 +243,7 @@ func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId 
 		credentials = append(credentials, cred)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("cannot iterate over credential rows: %w", err)
+		return nil, fmt.Errorf("cannot iterate over credential rows: %w", handleSqlError(err))
 	}
 
 	return &model.WebAuthnUser{
@@ -274,7 +255,7 @@ func (store *AuthStore) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId 
 	}, nil
 }
 
-func (store *AuthStore) UpdateWebAuthnCredentialAfterLogin(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
+func (store *Store) UpdateWebAuthnCredentialAfterLogin(ctx context.Context, tx *sql.Tx, userId int32, credential *webauthn.Credential) error {
 	data, err := json.Marshal(credential)
 	if err != nil {
 		return fmt.Errorf("cannot marshal credential data: %w", err)
@@ -286,25 +267,25 @@ func (store *AuthStore) UpdateWebAuthnCredentialAfterLogin(ctx context.Context, 
 	WHERE user_id = ?;
 	`, data, userId)
 	if err != nil {
-		return fmt.Errorf("cannot update credential data: %w", err)
+		return fmt.Errorf("cannot update credential data: %w", handleSqlError(err))
 	}
 
 	return nil
 }
 
-func (store *AuthStore) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) error {
+func (store *Store) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.Tx, userId int32) error {
 	_, err := tx.ExecContext(ctx, `
 	DELETE FROM webauthn_credentials
 	WHERE user_id = ?;
 	`, userId)
 	if err != nil {
-		return fmt.Errorf("cannot delete credential data: %w", err)
+		return fmt.Errorf("cannot delete credential data: %w", handleSqlError(err))
 	}
 
 	return nil
 }
 
-func (store *AuthStore) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int32, passkeyName string) (*model.Passkey, error) {
+func (store *Store) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int32, passkeyName string) (*model.Passkey, error) {
 	row := tx.QueryRowContext(ctx, `
 	UPDATE webauthn_credentials
 	SET name = ?
@@ -320,12 +301,12 @@ func (store *AuthStore) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId
 		&updatedPasskey.CreatedAt,
 		&updatedPasskey.LastUsedAt,
 	); err != nil {
-		return nil, fmt.Errorf("cannot update passkey: %w", err)
+		return nil, fmt.Errorf("cannot update passkey: %w", handleSqlError(err))
 	}
 	return &updatedPasskey, nil
 }
 
-func (store *AuthStore) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId int32) (*model.Passkey, error) {
+func (store *Store) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId int32) (*model.Passkey, error) {
 	row := tx.QueryRowContext(ctx, `
 	DELETE FROM webauthn_credentials
 	WHERE id = ?
@@ -340,19 +321,19 @@ func (store *AuthStore) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passk
 		&deletedPasskey.CreatedAt,
 		&deletedPasskey.LastUsedAt,
 	); err != nil {
-		return nil, fmt.Errorf("cannot delete passkey: %w", err)
+		return nil, fmt.Errorf("cannot delete passkey: %w", handleSqlError(err))
 	}
 	return &deletedPasskey, nil
 }
 
-func (store *AuthStore) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId int32) ([]model.Passkey, error) {
+func (store *Store) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId int32) ([]model.Passkey, error) {
 	rows, err := tx.QueryContext(ctx, `
 	SELECT id, name, user_id, created_at, last_used_at
 	FROM webauthn_credentials
 	WHERE user_id = ?;
 	`, userId)
 	if err != nil {
-		return nil, fmt.Errorf("cannot query passkeys: %w", err)
+		return nil, fmt.Errorf("cannot query passkeys: %w", handleSqlError(err))
 	}
 	defer rows.Close()
 
@@ -365,30 +346,30 @@ func (store *AuthStore) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, use
 			&pk.UserId,
 			&pk.CreatedAt,
 			&pk.LastUsedAt); err != nil {
-			return nil, fmt.Errorf("cannot scan passkey: %w", err)
+			return nil, fmt.Errorf("cannot scan passkey: %w", handleSqlError(err))
 		}
 		passkeys = append(passkeys, pk)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("cannot iterate over passkey rows: %w", err)
+		return nil, fmt.Errorf("cannot iterate over passkey rows: %w", handleSqlError(err))
 	}
 
 	return passkeys, nil
 }
 
-func (store *AuthStore) UpdatePasskeyLastUsedAt(ctx context.Context, tx *sql.Tx, passkeyId int32) error {
+func (store *Store) UpdatePasskeyLastUsedAt(ctx context.Context, tx *sql.Tx, passkeyId int32) error {
 	_, err := tx.ExecContext(ctx, `
 	UPDATE webauthn_credentials
 	SET last_used_at = CURRENT_TIMESTAMP
 	WHERE id = ?;
 	`, passkeyId)
 	if err != nil {
-		return fmt.Errorf("cannot update passkey last_used_at: %w", err)
+		return fmt.Errorf("cannot update passkey last_used_at: %w", handleSqlError(err))
 	}
 	return nil
 }
 
-func (store *AuthStore) Close() error {
+func (store *Store) Close() error {
 	if store.db != nil {
 		return store.db.Close()
 	}
@@ -524,6 +505,30 @@ func initWebAuthnTable(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+func handleSqlError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.ErrNotFound
+	}
+
+	var sqlErr sqlite3.Error
+	if errors.As(err, &sqlErr) {
+		if sqlErr.Code == sqlite3.ErrConstraint {
+			switch sqlErr.ExtendedCode {
+			case sqlite3.ErrConstraintUnique, sqlite3.ErrConstraintPrimaryKey:
+				return errs.ErrExists
+			default:
+				return errs.ErrConstraint
+			}
+		}
+	}
+
+	return err
 }
 
 func randomIdBytes() ([]byte, error) {
