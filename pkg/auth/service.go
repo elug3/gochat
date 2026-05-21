@@ -123,6 +123,7 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password, name
 	registeredEvent := events.UserRegistered{
 		UserId:    u.Id,
 		Username:  u.Username,
+		Name:      name,
 		Timestamp: time.Now().Unix(),
 	}
 	if s.outboxWorker != nil {
