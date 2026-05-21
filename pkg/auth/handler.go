@@ -32,7 +32,7 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.POST("/webauthn/register/finish", h.HandleWebAuthnRegisterFinish)
 
 	r.POST("/webauthn/login/begin", h.HandleWebAuthnLoginBegin)
-	r.POST("webauthn/login/finish", h.HandleWebAuthnLoginFinish)
+	r.POST("/webauthn/login/finish", h.HandleWebAuthnLoginFinish)
 
 	r.GET("/webauthn/passkeys", h.HandleGetWebAuthnPasskeys)
 	r.PUT("/webauthn/passkeys/:id", h.HandleUpdateWebAuthnPasskey)
@@ -138,12 +138,34 @@ func (h *AuthHandler) HandleJwks(c *gin.Context) {
 
 func (h *AuthHandler) HandleTokenExchange(c *gin.Context) {
 	var req struct {
-		SessionId          string   `json:"session_id" binding:"required"`
-		RequestedAudiences []string `json:"request_audiences" binding:"required"`
-		RequestedScopes    []string `json:"request_scopes" binding:"required"`
-		RequestedTTL       int64    `json:"request_ttl"`
+		SessionId          string   `json:"session_id" form:"session_id" binding:"required"`
+		RequestedAudiences []string `json:"request_audiences" form:"request_audiences" binding:"required"`
+		RequestedScopes    []string `json:"request_scopes" form:"request_scopes" binding:"required"`
+		RequestedTTL       int64    `json:"request_ttl" form:"request_ttl"`
 	}
-	h.auth.Exchange(c.Request.Context(), req.SessionId, req.RequestedAudiences, req.RequestedScopes, req.RequestedTTL)
+
+	if c.Request.Method == http.MethodGet {
+		if err := c.ShouldBindQuery(&req); err != nil {
+			c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request query"})
+			return
+		}
+	} else if err := c.BindJSON(&req); err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	token, err := h.auth.Exchange(
+		c.Request.Context(),
+		req.SessionId,
+		req.RequestedAudiences,
+		req.RequestedScopes,
+		req.RequestedTTL,
+	)
+	if err != nil {
+		c.IndentedJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, token)
 }
 
 func (h *AuthHandler) HandleCreateWsToken(c *gin.Context) {

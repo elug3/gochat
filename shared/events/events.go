@@ -51,6 +51,7 @@ var (
 type UserRegistered struct {
 	UserId    int32
 	Username  string
+	Name      string
 	Timestamp int64
 }
 

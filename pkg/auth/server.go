@@ -162,6 +162,16 @@ func initAuthService(opts Options) initStep {
 		if err != nil {
 			return err
 		}
+		if deps.Publisher != nil && deps.OutboxStore != nil {
+			outboxWorker, err := NewWorker(WorkerConfig{
+				Outbox:    deps.OutboxStore,
+				Publisher: deps.Publisher,
+			})
+			if err != nil {
+				return fmt.Errorf("new worker: %w", err)
+			}
+			auth.outboxWorker = outboxWorker
+		}
 
 		deps.Auth = auth
 		return nil
