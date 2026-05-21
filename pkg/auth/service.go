@@ -36,7 +36,7 @@ type AuthService struct {
 	webAuthn  *webauthn.WebAuthn
 	wsTokens  cache.Cache
 	publisher *events.Publisher
-	worker    *worker
+	outboxWorker *worker
 }
 
 type Client struct {
@@ -120,12 +120,19 @@ func (s *AuthService) RegisterUser(ctx context.Context, username, password, name
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if err = s.worker.Publish(ctx, events.UserRegistered{
+	registeredEvent := events.UserRegistered{
 		UserId:    u.Id,
 		Username:  u.Username,
 		Timestamp: time.Now().Unix(),
-	}); err != nil {
-		return nil, fmt.Errorf("publish: %w", err)
+	}
+	if s.outboxWorker != nil {
+		if err = s.outboxWorker.Publish(ctx, registeredEvent); err != nil {
+			return nil, fmt.Errorf("publish with outbox worker: %w", err)
+		}
+	} else if s.publisher != nil {
+		if err = s.publisher.Publish(registeredEvent); err != nil {
+			log.Err(err).Msg("failed to publish user registered event")
+		}
 	}
 
 	return u, nil
