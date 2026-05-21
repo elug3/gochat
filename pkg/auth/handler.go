@@ -32,7 +32,7 @@ func registerRoutes(r gin.IRouter, h *AuthHandler) {
 	r.POST("/webauthn/register/finish", h.HandleWebAuthnRegisterFinish)
 
 	r.POST("/webauthn/login/begin", h.HandleWebAuthnLoginBegin)
-	r.POST("webauthn/login/finish", h.HandleWebAuthnLoginFinish)
+	r.POST("/webauthn/login/finish", h.HandleWebAuthnLoginFinish)
 
 	r.GET("/webauthn/passkeys", h.HandleGetWebAuthnPasskeys)
 	r.PUT("/webauthn/passkeys/:id", h.HandleUpdateWebAuthnPasskey)
