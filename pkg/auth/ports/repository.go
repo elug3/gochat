@@ -19,6 +19,22 @@ type UserRepository interface {
 		ctx context.Context,
 		username string,
 	) (*domain.User, error)
+
+	GetUserByID(
+		ctx context.Context,
+		userID int32,
+	) (*domain.User, error)
+
+	UpdatePasswordHash(
+		ctx context.Context,
+		userID int32,
+		passwordHash string,
+	) error
+
+	DeleteUser(
+		ctx context.Context,
+		userID int32,
+	) error
 }
 
 // SessionRepository defines session persistence operations.
@@ -34,4 +50,18 @@ type SessionRepository interface {
 		ctx context.Context,
 		sessionID string,
 	) (*domain.Session, error)
+
+	ListUserSessions(
+		ctx context.Context,
+		userID int32,
+	) ([]*domain.Session, error)
+
+	RevokeSession(
+		ctx context.Context,
+		sessionID string,
+	) error
+
+	DeleteExpiredSessions(
+		ctx context.Context,
+	) error
 }
