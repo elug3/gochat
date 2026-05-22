@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elug3/gochat/pkg/auth/internal/model"
+	"github.com/elug3/gochat/pkg/auth/domain"
 )
 
 type meResponse struct {
@@ -51,7 +51,7 @@ func registerViaHTTP(t *testing.T, client *http.Client, baseURL, username, passw
 	}
 }
 
-func loginViaHTTP(t *testing.T, client *http.Client, baseURL, username, password string) *model.Session {
+func loginViaHTTP(t *testing.T, client *http.Client, baseURL, username, password string) *domain.Session {
 	t.Helper()
 	body := fmt.Sprintf(`{"username":"%s","password":"%s"}`, username, password)
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/login", strings.NewReader(body))
@@ -70,7 +70,7 @@ func loginViaHTTP(t *testing.T, client *http.Client, baseURL, username, password
 		t.Fatalf("expected login status 200, got %d: %s", resp.StatusCode, string(b))
 	}
 
-	var session model.Session
+	var session domain.Session
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
 		t.Fatalf("failed to decode login response: %v", err)
 	}

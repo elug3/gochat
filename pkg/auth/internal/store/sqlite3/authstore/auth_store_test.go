@@ -11,15 +11,15 @@ import (
 	"time"
 
 	"github.com/alexedwards/argon2id"
+	"github.com/elug3/gochat/pkg/auth/domain"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
-	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 
-	store, err := NewAuthStore("", true)
+	store, err := NewAuthStore(ctx, db)
 	if err != nil {
 		t.Fatalf("cannot create test store: %v", err)
 	}
@@ -36,7 +36,7 @@ func beginTx(t *testing.T, store *Store) *sql.Tx {
 	return tx
 }
 
-func mustCreateUser(t *testing.T, store *Store, tx *sql.Tx, username string) *model.User {
+func mustCreateUser(t *testing.T, store *Store, tx *sql.Tx, username string) *domain.User {
 	t.Helper()
 
 	u, err := store.CreateUser(t.Context(), tx, username)

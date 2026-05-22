@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/elug3/gochat/pkg/auth/internal/model"
+	"github.com/elug3/gochat/pkg/auth/domain"
 )
 
 type Store struct {
@@ -32,7 +32,7 @@ func NewStore(ctx context.Context, db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (store *Store) Insert(ctx context.Context, row model.OutboxRecord) error {
+func (store *Store) Insert(ctx context.Context, row domain.OutboxRecord) error {
 	if row.Id == "" {
 		return fmt.Errorf("outbox record id is required")
 	}
@@ -71,12 +71,12 @@ func (store *Store) ClaimBatch(
 	workerId string,
 	limit int,
 	leaseSeconds int,
-) ([]model.OutboxEvent, error) {
+) ([]domain.OutboxEvent, error) {
 	if workerId == "" {
 		return nil, fmt.Errorf("workerId is required")
 	}
 	if limit <= 0 {
-		return []model.OutboxEvent{}, nil
+		return []domain.OutboxEvent{}, nil
 	}
 	if leaseSeconds <= 0 {
 		leaseSeconds = 1
@@ -115,11 +115,11 @@ func (store *Store) ClaimBatch(
 	if _, err = tx.ExecContext(
 		ctx,
 		claimSQL,
-		model.OutboxStatusProcessing,
+		domain.OutboxStatusProcessing,
 		workerId,
 		leaseSeconds,
-		model.OutboxStatusNew,
-		model.OutboxStatusProcessing,
+		domain.OutboxStatusNew,
+		domain.OutboxStatusProcessing,
 		limit,
 	); err != nil {
 		return nil, fmt.Errorf("failed to set processing status: %w", err)
@@ -138,15 +138,15 @@ func (store *Store) ClaimBatch(
 	LIMIT ?;
 	`, nowExpr)
 
-	rows, err := tx.QueryContext(ctx, selectSQL, model.OutboxStatusProcessing, workerId, limit)
+	rows, err := tx.QueryContext(ctx, selectSQL, domain.OutboxStatusProcessing, workerId, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get claims: %w", err)
 	}
 	defer rows.Close()
 
-	events := make([]model.OutboxEvent, 0)
+	events := make([]domain.OutboxEvent, 0)
 	for rows.Next() {
-		var e model.OutboxEvent
+		var e domain.OutboxEvent
 		if err = rows.Scan(
 			&e.Id, &e.Subject, &e.Payload,
 			&e.Status, &e.CreatedAt, &e.AvailableAt,
@@ -181,7 +181,7 @@ func (store *Store) MarkCompleted(ctx context.Context, tx *sql.Tx, workerId, id 
 		locked_until = NULL,
 		last_error = NULL
 	WHERE id = ? AND locked_by = ?;
-	`, model.OutboxStatusCompleted, id, workerId)
+	`, domain.OutboxStatusCompleted, id, workerId)
 	if err != nil {
 		return fmt.Errorf("failed to mark outbox event completed: %w", err)
 	}
@@ -213,7 +213,7 @@ func (store *Store) Requeue(ctx context.Context, tx *sql.Tx, workerId, id string
 		locked_until = NULL,
 		last_error = ?
 	WHERE id = ? AND locked_by = ?;
-	`, model.OutboxStatusNew, availableAt, lastError, id, workerId)
+	`, domain.OutboxStatusNew, availableAt, lastError, id, workerId)
 	if err != nil {
 		return fmt.Errorf("failed to requeue outbox event: %w", err)
 	}
@@ -241,7 +241,7 @@ func (store *Store) MarkFailed(ctx context.Context, tx *sql.Tx, workerId, id str
 		locked_until = NULL,
 		last_error = ?
 	WHERE id = ? AND locked_by = ?;
-	`, model.OutboxStatusFailed, lastError, id, workerId)
+	`, domain.OutboxStatusFailed, lastError, id, workerId)
 	if err != nil {
 		return fmt.Errorf("failed to mark outbox event failed: %w", err)
 	}

@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/alexedwards/argon2id"
+	"github.com/elug3/gochat/pkg/auth/domain"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
 	"github.com/elug3/gochat/pkg/auth/internal/jwk"
-	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3/authstore"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/go-webauthn/webauthn/protocol"
@@ -29,13 +29,13 @@ import (
 )
 
 type AuthService struct {
-	logger    *zerolog.Logger
-	authStore *authstore.Store
-	jwtKey    *rsa.PrivateKey
-	jwks      *jwk.Jwks
-	webAuthn  *webauthn.WebAuthn
-	wsTokens  cache.Cache
-	publisher *events.Publisher
+	logger       *zerolog.Logger
+	authStore    *authstore.Store
+	jwtKey       *rsa.PrivateKey
+	jwks         *jwk.Jwks
+	webAuthn     *webauthn.WebAuthn
+	wsTokens     cache.Cache
+	publisher    *events.Publisher
 	outboxWorker *worker
 }
 
@@ -93,7 +93,7 @@ func credentialsRule(username, password string) error {
 	return nil
 }
 
-func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (*model.User, error) {
+func (s *AuthService) RegisterUser(ctx context.Context, username, password, name string) (*domain.User, error) {
 	tx, err := s.authStore.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -163,7 +163,7 @@ func (s *AuthService) UpdatePassword(ctx context.Context, uid int32, password st
 	return nil
 }
 
-func (s *AuthService) Login(ctx context.Context, username, password string, client *Client) (*model.Session, error) {
+func (s *AuthService) Login(ctx context.Context, username, password string, client *Client) (*domain.Session, error) {
 	if client == nil {
 		client = &Client{
 			IP:        net.IPv4zero,
@@ -218,7 +218,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 		}
 	}
 
-	return &model.Session{
+	return &domain.Session{
 		SessionId: sessionId,
 		UserId:    pw.UserId,
 		CreatedAt: createdAt,
@@ -228,7 +228,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string, clie
 	}, nil
 }
 
-func (s *AuthService) Exchange(ctx context.Context, sessionId string, requestedAudiences, requestedScopes []string, requestedTTL int64) (*model.Token, error) {
+func (s *AuthService) Exchange(ctx context.Context, sessionId string, requestedAudiences, requestedScopes []string, requestedTTL int64) (*domain.Token, error) {
 	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -248,7 +248,7 @@ func (s *AuthService) Exchange(ctx context.Context, sessionId string, requestedA
 	return token, nil
 }
 
-func (s *AuthService) validateSession(ctx context.Context, tx *sql.Tx, sessionId string) (*model.Session, error) {
+func (s *AuthService) validateSession(ctx context.Context, tx *sql.Tx, sessionId string) (*domain.Session, error) {
 	hash, err := hashSessionId(sessionId)
 	if err != nil {
 		return nil, fmt.Errorf("hash session id: %w", err)
@@ -357,10 +357,10 @@ func (s *AuthService) WebAuthnLoginBegin(ctx context.Context) (*protocol.Credent
 	return assertion, nil
 }
 
-func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *protocol.ParsedCredentialAssertionData, client *Client) (*model.Session, error) {
+func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *protocol.ParsedCredentialAssertionData, client *Client) (*domain.Session, error) {
 	expiresAt := time.Now().Add(7 * 24 * time.Hour) // TODO: make configurable
 	var (
-		u   *model.WebAuthnUser
+		u   *domain.WebAuthnUser
 		err error
 	)
 	tx, err := s.authStore.BeginTx(ctx, nil)
@@ -377,7 +377,7 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 	}
 
 	credential, err := s.webAuthn.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (user webauthn.User, err error) {
-		uid, err := model.UserIdFromUserHandler(userHandle)
+		uid, err := domain.UserIdFromUserHandler(userHandle)
 		if err != nil {
 			return nil, fmt.Errorf("invalid user handle: %w", err)
 		}
@@ -416,7 +416,7 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return &model.Session{
+	return &domain.Session{
 		SessionId: sessionId,
 		UserId:    u.Id,
 		CreatedAt: createdAt,
@@ -426,7 +426,7 @@ func (s *AuthService) WebAuthnLoginFinish(ctx context.Context, parsedResponse *p
 	}, nil
 }
 
-func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32) ([]model.Passkey, error) {
+func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32) ([]domain.Passkey, error) {
 	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -441,7 +441,7 @@ func (s *AuthService) GetWebAuthnUserPasskeys(ctx context.Context, userId int32)
 	return passkeys, nil
 }
 
-func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkeyId int32, newName string) (*model.Passkey, error) {
+func (s *AuthService) UpdateWebAuthnPasskey(ctx context.Context, userId, passkeyId int32, newName string) (*domain.Passkey, error) {
 	tx, err := s.authStore.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -551,12 +551,12 @@ func (s *AuthService) Close() error {
 	return s.authStore.Close()
 }
 
-func newToken(userId int32, jwtKey *rsa.PrivateKey, audiences []string, TTL int64) (*model.Token, error) {
+func newToken(userId int32, jwtKey *rsa.PrivateKey, audiences []string, TTL int64) (*domain.Token, error) {
 	accessToken, err := newClaims(userId, jwtKey, audiences, TTL)
 	if err != nil {
 		return nil, err
 	}
-	return &model.Token{
+	return &domain.Token{
 		UserId:      userId,
 		AccessToken: accessToken,
 	}, nil

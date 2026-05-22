@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/elug3/gochat/pkg/auth/domain"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
-	"github.com/elug3/gochat/pkg/auth/internal/model"
 	"github.com/go-webauthn/webauthn/webauthn"
 	sqlite3 "github.com/mattn/go-sqlite3"
 )
@@ -49,8 +49,8 @@ func (store *Store) DB() *sql.DB {
 	return store.db
 }
 
-func (store *Store) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*model.User, error) {
-	var u model.User
+func (store *Store) CreateUser(ctx context.Context, tx *sql.Tx, username string) (*domain.User, error) {
+	var u domain.User
 	err := tx.QueryRowContext(ctx, `
 	INSERT INTO users (username)
 	VALUES (?)
@@ -63,8 +63,8 @@ func (store *Store) CreateUser(ctx context.Context, tx *sql.Tx, username string)
 	return &u, nil
 }
 
-func (store *Store) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (*model.User, error) {
-	var u model.User
+func (store *Store) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (*domain.User, error) {
+	var u domain.User
 	err := tx.QueryRowContext(ctx, `
 	SELECT id, username
 	FROM users
@@ -88,8 +88,8 @@ func (store *Store) SetPasswordHash(ctx context.Context, tx *sql.Tx, userId int3
 	return nil
 }
 
-func (store *Store) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, username string) (*model.PasswordCredential, error) {
-	var pw model.PasswordCredential
+func (store *Store) GetPasswordByUsername(ctx context.Context, tx *sql.Tx, username string) (*domain.PasswordCredential, error) {
+	var pw domain.PasswordCredential
 	err := tx.QueryRowContext(ctx, `
 	SELECT p.user_id, u.username, p.password_hash
 	FROM passwords as p
@@ -113,9 +113,9 @@ func (store *Store) SaveSession(ctx context.Context, tx *sql.Tx, userId int32, s
 	return nil
 }
 
-func (store *Store) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessionHash string) (*model.Session, error) {
+func (store *Store) GetSessionByHash(ctx context.Context, tx *sql.Tx, sessionHash string) (*domain.Session, error) {
 	var (
-		session model.Session
+		session domain.Session
 		ip      string
 		revoked sql.NullTime
 	)
@@ -210,8 +210,8 @@ func (store *Store) SaveWebAuthnCredential(ctx context.Context, tx *sql.Tx, user
 // GetWebAuthnUser returns the WebAuthnUser for the given userId.
 // It returns empty credentials user for valid user with no credentials.
 // If user does not exist, returns errs.ErrNotFound.
-func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*model.WebAuthnUser, error) {
-	var u model.User
+func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int32) (*domain.WebAuthnUser, error) {
+	var u domain.User
 	row := tx.QueryRowContext(ctx, `
 	SELECT id, username
 	FROM users
@@ -246,7 +246,7 @@ func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int3
 		return nil, fmt.Errorf("cannot iterate over credential rows: %w", handleSqlError(err))
 	}
 
-	return &model.WebAuthnUser{
+	return &domain.WebAuthnUser{
 		Id:          u.Id,
 		Name:        u.Username,
 		DisplayName: u.Username,
@@ -285,7 +285,7 @@ func (store *Store) DeleteWebAuthnCredentials(ctx context.Context, tx *sql.Tx, u
 	return nil
 }
 
-func (store *Store) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int32, passkeyName string) (*model.Passkey, error) {
+func (store *Store) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int32, passkeyName string) (*domain.Passkey, error) {
 	row := tx.QueryRowContext(ctx, `
 	UPDATE webauthn_credentials
 	SET name = ?
@@ -293,7 +293,7 @@ func (store *Store) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int
 	RETURNING id, name, user_id, created_at, last_used_at;
 	`, passkeyName, passkeyId)
 
-	var updatedPasskey model.Passkey
+	var updatedPasskey domain.Passkey
 	if err := row.Scan(
 		&updatedPasskey.Id,
 		&updatedPasskey.KeyName,
@@ -306,14 +306,14 @@ func (store *Store) UpdatePasskey(ctx context.Context, tx *sql.Tx, passkeyId int
 	return &updatedPasskey, nil
 }
 
-func (store *Store) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId int32) (*model.Passkey, error) {
+func (store *Store) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId int32) (*domain.Passkey, error) {
 	row := tx.QueryRowContext(ctx, `
 	DELETE FROM webauthn_credentials
 	WHERE id = ?
 	RETURNING id, name, user_id, created_at, last_used_at;
 	`, passkeyId)
 
-	var deletedPasskey model.Passkey
+	var deletedPasskey domain.Passkey
 	if err := row.Scan(
 		&deletedPasskey.Id,
 		&deletedPasskey.KeyName,
@@ -326,7 +326,7 @@ func (store *Store) DeletePasskeyById(ctx context.Context, tx *sql.Tx, passkeyId
 	return &deletedPasskey, nil
 }
 
-func (store *Store) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId int32) ([]model.Passkey, error) {
+func (store *Store) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId int32) ([]domain.Passkey, error) {
 	rows, err := tx.QueryContext(ctx, `
 	SELECT id, name, user_id, created_at, last_used_at
 	FROM webauthn_credentials
@@ -337,9 +337,9 @@ func (store *Store) GetPasskeysByUserId(ctx context.Context, tx *sql.Tx, userId 
 	}
 	defer rows.Close()
 
-	passkeys := make([]model.Passkey, 0)
+	passkeys := make([]domain.Passkey, 0)
 	for rows.Next() {
-		var pk model.Passkey
+		var pk domain.Passkey
 		if err := rows.Scan(
 			&pk.Id,
 			&pk.KeyName,

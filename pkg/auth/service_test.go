@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/elug3/gochat/pkg/auth"
+	"github.com/elug3/gochat/pkg/auth/domain"
 	"github.com/elug3/gochat/pkg/auth/internal/errs"
-	"github.com/elug3/gochat/pkg/auth/internal/model"
 )
 
 var testOptions = auth.Options{
@@ -45,7 +45,7 @@ func newTestService(t *testing.T) (*auth.AuthService, error) {
 	return service, nil
 }
 
-func genUser(t *testing.T, service *auth.AuthService) (*model.User, error) {
+func genUser(t *testing.T, service *auth.AuthService) (*domain.User, error) {
 	t.Helper()
 
 	username := genRandomUsername()

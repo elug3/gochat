@@ -1,0 +1,57 @@
+package domain
+package domain
+
+import (
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}	}, nil		Attempts:    0,		AvailableAt: time.Now().Unix(),		CreatedAt:   time.Now().Unix(),		Payload:     payload,		Subject:     e.Subject(),		Id:          uuid.NewString(),	return &OutboxRecord{	}		return nil, err	if err != nil {	payload, err := json.Marshal(e)func NewOutboxRecord(e events.Event) (*OutboxRecord, error) {}	LastError   string	Attempts    int	LockedUntil int64	LockedBy    string	AvailableAt int64	CreatedAt   int64	Status      OutboxStatus	Payload     []byte	Subject     string	Id          stringtype OutboxEvent struct {)	OutboxStatusFailed	OutboxStatusCompleted	OutboxStatusProcessing	OutboxStatusNew OutboxStatus = iotaconst (type OutboxStatus int}	Attempts    int	AvailableAt int64	CreatedAt   int64	Payload     []byte	Subject     string	Id          stringtype OutboxRecord struct {)	"github.com/google/uuid"	"github.com/elug3/gochat/shared/events"	"time"	"encoding/json"

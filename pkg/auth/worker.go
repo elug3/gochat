@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/elug3/gochat/pkg/auth/internal/model"
+	"github.com/elug3/gochat/pkg/auth/domain"
 	"github.com/elug3/gochat/pkg/auth/internal/store/sqlite3/outboxstore"
 	"github.com/elug3/gochat/shared/events"
 	"github.com/google/uuid"
@@ -98,7 +98,7 @@ func (w *worker) Publish(ctx context.Context, ev events.Event) error {
 		return err
 	}
 
-	err = w.outbox.Insert(ctx, model.OutboxRecord{
+	err = w.outbox.Insert(ctx, domain.OutboxRecord{
 		Id:          uuid.NewString(),
 		Subject:     ev.Subject(),
 		Payload:     payload,
@@ -150,7 +150,7 @@ func (w *worker) Run(ctx context.Context) {
 	}
 }
 
-func (w *worker) handleFailure(ctx context.Context, row model.OutboxEvent, publishErr error) {
+func (w *worker) handleFailure(ctx context.Context, row domain.OutboxEvent, publishErr error) {
 	if w == nil || publishErr == nil {
 		return
 	}

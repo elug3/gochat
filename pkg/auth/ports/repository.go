@@ -1,21 +1,10 @@
 package ports
 
-import "context"
+import (
+	"context"
 
-// User represents a minimal auth user domain model used by service ports.
-type User struct {
-	ID       int32
-	Username string
-	Name     string
-}
-
-// Session represents a minimal auth session domain model used by service ports.
-type Session struct {
-	ID        string
-	UserID    int32
-	Audiences []string
-	Scopes    []string
-}
+	"github.com/elug3/gochat/pkg/auth/domain"
+)
 
 // UserRepository defines persistence operations required by auth services.
 type UserRepository interface {
@@ -24,12 +13,12 @@ type UserRepository interface {
 		username string,
 		passwordHash string,
 		name string,
-	) (*User, error)
+	) (*domain.User, error)
 
 	GetUserByUsername(
 		ctx context.Context,
 		username string,
-	) (*User, error)
+	) (*domain.User, error)
 }
 
 // SessionRepository defines session persistence operations.
@@ -39,10 +28,10 @@ type SessionRepository interface {
 		userID int32,
 		audiences []string,
 		scopes []string,
-	) (*Session, error)
+	) (*domain.Session, error)
 
 	GetSessionByID(
 		ctx context.Context,
 		sessionID string,
-	) (*Session, error)
+	) (*domain.Session, error)
 }
