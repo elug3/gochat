@@ -1,5 +1,7 @@
 package events
 
+import "net"
+
 type Event interface {
 	Subject() string
 }
@@ -7,6 +9,7 @@ type Event interface {
 const (
 	// SubjectUserRegistered is the subject for UserRegistered events.
 	SubjectUserRegistered = "auth.registered"
+	SubjectUserLoggedIn   = "auth.logged_in"
 
 	SubjectProfileCreated = "contacts.profile.created"
 	SubjectGroupCreated   = "contacts.group.created"
@@ -52,6 +55,15 @@ type UserRegistered struct {
 	UserId    int32
 	Username  string
 	Name      string
+	Timestamp int64
+}
+
+// UserLoggedIn is published by AuthService when a user successfully logs in.
+type UserLoggedIn struct {
+	UserId    int32
+	Username  string
+	IP        net.IP
+	UserAgent string
 	Timestamp int64
 }
 
@@ -121,6 +133,10 @@ type WebsocketDisconnected struct {
 
 func (e UserRegistered) Subject() string {
 	return SubjectUserRegistered
+}
+
+func (e UserLoggedIn) Subject() string {
+	return SubjectUserLoggedIn
 }
 
 func (e GroupCreated) Subject() string {
