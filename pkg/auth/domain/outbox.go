@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/elug3/gochat/shared/events"
-	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 )
 

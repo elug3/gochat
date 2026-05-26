@@ -55,7 +55,7 @@ func (store *Store) CreateUser(ctx context.Context, tx *sql.Tx, username string)
 	INSERT INTO users (username)
 	VALUES (?)
 	RETURNING id, username;
-	`, username).Scan(&u.Id, &u.Username)
+	`, username).Scan(&u.ID, &u.Username)
 	if err != nil {
 		return nil, fmt.Errorf("cannot insert user: %w", handleSqlError(err))
 	}
@@ -68,7 +68,7 @@ func (store *Store) GetUserById(ctx context.Context, tx *sql.Tx, userId int32) (
 	err := tx.QueryRowContext(ctx, `
 	SELECT id, username
 	FROM users
-	WHERE id = ?;`, userId).Scan(&u.Id, &u.Username)
+	WHERE id = ?;`, userId).Scan(&u.ID, &u.Username)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get user: %w", handleSqlError(err))
 	}
@@ -216,7 +216,7 @@ func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int3
 	SELECT id, username
 	FROM users
 	WHERE id = ?;`, userId)
-	err := row.Scan(&u.Id, &u.Username)
+	err := row.Scan(&u.ID, &u.Username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query user: %w", handleSqlError(err))
 	}
@@ -247,7 +247,7 @@ func (store *Store) GetWebAuthnUser(ctx context.Context, tx *sql.Tx, userId int3
 	}
 
 	return &domain.WebAuthnUser{
-		Id:          u.Id,
+		Id:          u.ID,
 		Name:        u.Username,
 		DisplayName: u.Username,
 		Icon:        "",
