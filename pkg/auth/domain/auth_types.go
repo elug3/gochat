@@ -23,11 +23,6 @@ type Token struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
-type User struct {
-	Id       int32
-	Username string
-}
-
 type PasswordCredential struct {
 	UserId       int32
 	Username     string
