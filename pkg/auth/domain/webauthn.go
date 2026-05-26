@@ -1,58 +1,65 @@
 package domain
-package domain
 
+import (
+	"strconv"
+	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
+)
 
+// WebAuthnUser represents a user in the context of WebAuthn authentication
+type WebAuthnUser struct {
+	Id          int32
+	Name        string
+	DisplayName string
+	Icon        string
+	Credentials []webauthn.Credential
+}
 
+// WebAuthnID implements the webauthn.User interface
+func (u *WebAuthnUser) WebAuthnID() []byte {
+	return UserHandlerIdBytes(u.Id)
+}
 
+// WebAuthnName implements the webauthn.User interface
+func (u *WebAuthnUser) WebAuthnName() string {
+	return u.Name
+}
 
+// WebAuthnDisplayName implements the webauthn.User interface
+func (u *WebAuthnUser) WebAuthnDisplayName() string {
+	return u.DisplayName
+}
 
+// WebAuthnIcon implements the webauthn.User interface
+func (u *WebAuthnUser) WebAuthnIcon() string {
+	return u.Icon
+}
 
+// WebAuthnCredentials implements the webauthn.User interface
+func (u *WebAuthnUser) WebAuthnCredentials() []webauthn.Credential {
+	return u.Credentials
+}
 
+// UserHandlerIdBytes converts a user ID to bytes for WebAuthn user handle
+func UserHandlerIdBytes(userId int32) []byte {
+	return []byte(strconv.FormatInt(int64(userId), 10))
+}
 
+// UserIdFromUserHandler converts a user handle (bytes) back to a user ID
+func UserIdFromUserHandler(userHandle []byte) (int32, error) {
+	id, err := strconv.ParseInt(string(userHandle), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int32(id), nil
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	LastUsedAt time.Time `json:"last_used_at"`	CreatedAt  time.Time `json:"created_at"`	UserId     int32     `json:"user_id"`	KeyName    string    `json:"key_name"`	Id         int32     `json:"id"`type Passkey struct {}	return int32(id), nil	}		return 0, err	if err != nil {	id, err := strconv.ParseInt(string(userHandle), 10, 32)func UserIdFromUserHandler(userHandle []byte) (int32, error) {}	return []byte(strconv.FormatInt(int64(userId), 10))func UserHandlerIdBytes(userId int32) []byte {}	return u.Credentialsfunc (u *WebAuthnUser) WebAuthnCredentials() []webauthn.Credential {}	return u.Iconfunc (u *WebAuthnUser) WebAuthnIcon() string {}	return u.DisplayNamefunc (u *WebAuthnUser) WebAuthnDisplayName() string {}	return u.Namefunc (u *WebAuthnUser) WebAuthnName() string {}	return UserHandlerIdBytes(u.Id)func (u *WebAuthnUser) WebAuthnID() []byte {}	Credentials []webauthn.Credential	Icon        string	DisplayName string	Name        string	Id          int32type WebAuthnUser struct {)	"github.com/go-webauthn/webauthn/webauthn"	"time"	"strconv"import (
+// Passkey represents a stored WebAuthn credential for a user
+type Passkey struct {
+	Id         int32     `json:"id"`
+	KeyName    string    `json:"key_name"`
+	UserId     int32     `json:"user_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
+}
